@@ -57,7 +57,7 @@ class pci_chooser_t(ida_kernwin.Choose):
                 target_off = off
                 if off not in col_offs:
                     # sometimes, mdisp is not included in COLs.
-                    # in thoses cases, get the least offset in COLs and it is treated as the offset.
+                    # in those cases, get the least offset in COLs and it is treated as the offset.
                     target_off = 0
                     if len(col_offs) > 0:
                         target_off = sorted(col_offs)[0]
@@ -79,7 +79,7 @@ class pci_chooser_t(ida_kernwin.Choose):
             n = n[0]
         return self.items[n]
     
-    # for old versons of IDA
+    # for old versions of IDA
     def OnSelectLine(self, n):
         # CH_MULTI passes a list.
         # Change it to integer before passing to jumpto.
