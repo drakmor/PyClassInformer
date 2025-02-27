@@ -44,4 +44,4 @@ You will also see class hierarchies by checking indents of BCDs. For example, CM
 - I **WILL NOT** support beta versions of IDA. **DO NOT** open an issue about it.
 - Some code is from SusanRTTI and the output table is similar to Class Informer.  
 [https://github.com/nccgroup/SusanRTTI](https://github.com/nccgroup/SusanRTTI)  
-[https://github.com/herosi/classinformer](https://sourceforge.net/projects/classinformer/)
+[https://sourceforge.net/projects/classinformer/](https://sourceforge.net/projects/classinformer/)
