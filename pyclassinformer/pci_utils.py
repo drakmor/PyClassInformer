@@ -264,7 +264,9 @@ def set_opinfo(tif, udt, udt_idx):
 """
 
 
-def get_val_repr(vtype=ida_typeinf.FRB_OFFSET, flags=ida_nalt.REF_OFF64|ida_nalt.REFINFO_RVAOFF):
+def get_val_repr(vtype=-1, flags=ida_nalt.REF_OFF64|ida_nalt.REFINFO_RVAOFF):
+    if vtype < 0:
+        vtype = ida_typeinf.FRB_OFFSET
     r = ida_typeinf.value_repr_t()
     r.set_vtype(vtype)
     r.ri.init(flags)
