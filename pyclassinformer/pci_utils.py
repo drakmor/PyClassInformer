@@ -177,7 +177,13 @@ class utils(object):
         return col_offs, curr_off
 
 
-def build_udm(name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1):
+def add_struc_by_name_and_def(name, struc_def):
+    tif = ida_typeinf.tinfo_t(struc_def)
+    tif.set_named_type(None, name, ida_typeinf.NTF_REPLACE)
+    return tif
+
+
+def build_udm(name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1, vrepr=None):
     # create a struct member
     udm = ida_typeinf.udm_t()
     udm.name = name
@@ -185,26 +191,38 @@ def build_udm(name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1):
         udm.size = msize * 8
         
     udm.offset = tif.get_unpadded_size() * 8
-    if moffset > 0:
+    if moffset >= 0:
         udm.offset = moffset * 8
         
     udm.type = ida_typeinf.tinfo_t(mtype)
+    
+    if vrepr:
+        udm.set_value_repr(vrepr)
         
     return udm
 
+def add_struc(name):
+    tif = ida_typeinf.tinfo_t()
+    udt = ida_typeinf.udt_type_data_t()
+    # add the structure to local types
+    if tif.create_udt(udt):
+        tif.set_named_type(None, name)
+    return tif
 
-def _add_struc_member(tif, name, msize=0, mtype=None, moffset=-1):
-    udm = build_udm(name, msize, mtype, moffset)
+
+def add_struc_member(tif, name, msize=0, mtype=None, moffset=-1, vrepr=None):
+    udm = build_udm(name, msize, mtype, moffset, vrepr)
     tif.add_udm(udm, ida_typeinf.ETF_MAY_DESTROY|ida_typeinf.ETF_FORCENAME)
     return udm
 
 
 def create_ptr_attr(data_type=ida_typeinf.BTF_INT, attr=ida_typeinf.TAPTR_PTR32):
-    mtif = ida_typeinf.tinfo_t(data_type)
-    mtif.create_ptr(mtif)
+    # pointer description
     pi = ida_typeinf.ptr_type_data_t()
-    mtif.get_ptr_details(pi)
-    pi.taptr_bits = ida_typeinf.TAPTR_PTR32
+    pi.obj_type = ida_typeinf.tinfo_t(data_type)
+    pi.taptr_bits = attr
+    # pointer type
+    mtif = ida_typeinf.tinfo_t()
     mtif.create_ptr(pi)
     return mtif
 
@@ -217,6 +235,7 @@ def get_ptr_type(type_name, ptr_size=ida_typeinf.TAPTR_PTR32):
     return None
 
 
+"""
 def get_refinfo(reftype=ida_nalt.REF_OFF64, flags=ida_nalt.REFINFO_RVAOFF):
     ri = ida_nalt.refinfo_t()
     ri.flags = flags
@@ -242,6 +261,37 @@ def set_opinfo(tif, udt, udt_idx):
     udt[udt_idx].repr.from_opinfo(flags, 0, oi, None)
     tif.set_udm_repr(udt_idx, udt[udt_idx].repr)
     tif.set_udm_type(udt_idx, mtif)
+"""
+
+
+def get_val_repr(vtype=ida_typeinf.FRB_OFFSET, flags=ida_nalt.REF_OFF64|ida_nalt.REFINFO_RVAOFF):
+    r = ida_typeinf.value_repr_t()
+    r.set_vtype(vtype)
+    r.ri.init(flags)
+    return r
+
+
+"""
+struc_def = '''
+struct RTTICompleteObjectLocator
+{
+  int signature;
+  int offset;
+  int cdOffset;
+  int pTypeDescriptor;
+  int pClassDescriptor;
+  int pSelf;
+};
+'''
+name = "RTTICompleteObjectLocator"
+tif = add_struc_by_name_and_def(name, struc_def)
+
+r = get_val_repr(ida_typeinf.FRB_OFFSET, ida_nalt.REF_OFF64|ida_nalt.REFINFO_RVAOFF)
+mtif = create_ptr_attr(ida_typeinf.BTF_INT, ida_typeinf.TAPTR_PTR32)
+for i in range(3, 6):
+    tif.set_udm_type(i, mtif, 0, r)
+ida_typeinf.apply_tinfo(here(), tif, ida_typeinf.TINFO_DEFINITE)
+"""
 
 
 def get_value_with_size(val, vsize):
