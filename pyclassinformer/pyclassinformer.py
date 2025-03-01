@@ -189,7 +189,7 @@ class RTTIBaseClassDescriptor(RTTIStruc):
         ida_bytes.del_items(ea, ida_bytes.DELIT_DELNAMES, self.size)
         if ida_bytes.create_struct(ea, self.size, self.tid):
             # Get members of BCD
-            self.td = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pTypeDescriptor")) + u.x64_imagebase()
+            self.tdea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pTypeDescriptor")) + u.x64_imagebase()
             self.nb_cbs = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "numContainerBases"))
             self.mdisp = u.to_signed32(ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "mdisp")))
             self.pdisp = u.to_signed32(ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pdisp")))
@@ -380,11 +380,14 @@ def parse_msvc_vftable():
     # ida fails to apply a structure type to bytes under some conditions, although create_struct returns True.
     # to avoid that, apply them again.
     ida_auto.auto_wait()
-    if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) == 0:
+    #print(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result]))
+    if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) != len([result[x].ea for x in result]):
         [ida_bytes.create_struct(result[x].ea, RTTICompleteObjectLocator.size, RTTICompleteObjectLocator.tid, True) for x in result]
-    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) == 0:
+    #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
+    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
         [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
-    if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) == 0:
+    #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([result[x].td.ea for x in result])))
+    if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([result[x].td.ea for x in result])):
         [ida_bytes.create_struct(result[x].td.ea, result[x].td.size, RTTITypeDescriptor.tid, True) for x in result]
         
     # for refreshing xrefs to get xrefs from COLs to TDs
@@ -402,13 +405,26 @@ def parse_msvc_vftable():
     # ida fails to apply a structure type to bytes under some conditions, although create_struct returns True.
     # to avoid that, apply them again.
     ida_auto.auto_wait()
-    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) == 0:
+    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result])))
+    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) != len(set([result[x].chd.bca.ea for x in result])):
         [ida_bytes.create_struct(result[x].chd.bca.ea, result[x].chd.bca.size, RTTIBaseClassArray.tid, True) for x in result]
-    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) == 0:
+    #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
+    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
         [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
-    [[ida_bytes.create_struct(y.ea, RTTIBaseClassDescriptor.size, RTTIBaseClassDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
+    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases])))
+    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]) != len(set([y.ea for x in result for y in result[x].chd.bca.bases])):
+        [[ida_bytes.create_struct(y.ea, RTTIBaseClassDescriptor.size, RTTIBaseClassDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
+    #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases])))
+    if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
+        [[ida_bytes.create_struct(y.tdea, RTTITypeDescriptor.size, RTTITypeDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
     ida_auto.auto_wait()
-            
+    
+    # for debugging
+    #print(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result]))
+    #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
+    #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases])))
+    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result])))
+    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases])))
     return result
 
 
