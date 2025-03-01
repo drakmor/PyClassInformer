@@ -57,7 +57,7 @@ class RTTITypeDescriptor(RTTIStruc):
     else:
         idc.add_struc_member(msid, "pVFTable", ida_idaapi.BADADDR, ida_bytes.FF_DATA|u.PTR_TYPE|ida_bytes.FF_0OFF, u.mt_address().tid, u.PTR_SIZE)
     idc.add_struc_member(msid, "spare", ida_idaapi.BADADDR, ida_bytes.FF_DATA|u.PTR_TYPE, -1, u.PTR_SIZE)
-    idc.add_struc_member(msid, "name", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_STRLIT, u.mt_ascii().tid, 0)
+    idc.add_struc_member(msid, "name", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_STRLIT, ida_nalt.STRTYPE_C, 0)
     
     # get structure related info
     tid = msid
@@ -75,7 +75,7 @@ class RTTITypeDescriptor(RTTIStruc):
         if strlen is None:
             # not a real vtable
             return
-        self.size = self.size + strlen
+        self.size = self.size + strlen + 1 # for NULL byte
         
         # get mangled name
         bmangled = ida_bytes.get_strlit_contents(name, strlen, 0)
@@ -240,13 +240,6 @@ class RTTIBaseClassArray(RTTIStruc):
         for i in range(0, nb_classes):
             bcdoff = ea+i*4
             
-            # apply data type to items in BCA
-            #ida_bytes.create_dword(bcdoff, 4)
-            #if u.x64:
-            #    ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF|ida_nalt.REFINFO_RVAOFF, -1, 0, 0)
-            #else:
-            #    ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF, -1, 0, 0)
-                    
             # get relevant structures
             bcdea = ida_bytes.get_32bit(bcdoff) + u.x64_imagebase()
             bcd = RTTIBaseClassDescriptor(bcdea)
@@ -411,6 +404,9 @@ def parse_msvc_vftable():
     ida_auto.auto_wait()
     if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) == 0:
         [ida_bytes.create_struct(result[x].chd.bca.ea, result[x].chd.bca.size, RTTIBaseClassArray.tid, True) for x in result]
+    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) == 0:
+        [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
+    [[ida_bytes.create_struct(y.ea, RTTIBaseClassDescriptor.size, RTTIBaseClassDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
     ida_auto.auto_wait()
             
     return result
