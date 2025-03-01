@@ -136,9 +136,9 @@ class RTTIClassHierarchyDescriptor(RTTIStruc):
         if ida_bytes.create_struct(ea, self.size, self.tid):
             # Get members of CHD
             self.sig = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "signature"))
-            self.bcaea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pBaseClassArray")) + u.x64_imagebase()
-            self.nb_classes = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "numBaseClasses"))
             self.attribute = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "attribute"))
+            self.nb_classes = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "numBaseClasses"))
+            self.bcaea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pBaseClassArray")) + u.x64_imagebase()
             
             self.bca = RTTIBaseClassArray(self.bcaea, self.nb_classes)
             
@@ -332,7 +332,7 @@ class RTTICompleteObjectLocator(RTTIStruc):
             self.cdOffset = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "cdOffset"))
             self.tdea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pTypeDescriptor")) + u.x64_imagebase()
             self.chdea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pClassDescriptor")) + u.x64_imagebase()
-            self.selfea = 0
+            self.selfea = ida_idaapi.BADADDR
             if u.x64:
                 self.selfea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pSelf")) + u.x64_imagebase()
                 
@@ -432,12 +432,12 @@ def display_result(result):
     for vtable in result:
         col = result[vtable]
         print("vtable at : " + hex(vtable))
-        print("  COL at {:#x}:".format(col.ea), col.name, col.sig, col.offset, col.cdOffset, hex(col.tdea), hex(col.chdea), hex(col.selfea))
-        print("  CHD at {:#x}:".format(col.chd.ea), hex(col.chd.sig), hex(col.chd.bcaea), col.chd.nb_classes, col.chd.flags)
+        print("  COL at {:#x}:".format(col.ea), col.name, col.sig, col.offset, col.cdOffset, hex(col.tdea), hex(col.chdea), hex(col.selfea) if col.selfea != ida_idaapi.BADADDR else "")
+        print("  CHD at {:#x}:".format(col.chd.ea), hex(col.chd.sig), col.chd.flags, col.chd.nb_classes, hex(col.chd.bcaea))
         
         # get BCDs
         for bcd in col.chd.bca.bases:
-            print("    {}BCD at {:#x}:".format(" " *bcd.depth*2, bcd.ea), bcd.name, bcd.nb_cbs, bcd.mdisp, bcd.pdisp, bcd.vdisp, bcd.attributes, hex(bcd.chdea))
+            print("    {}BCD at {:#x}:".format(" " *bcd.depth*2, bcd.ea), bcd.name, hex(bcd.tdea), bcd.nb_cbs, bcd.mdisp, bcd.pdisp, bcd.vdisp, bcd.attributes, hex(bcd.chdea))
 
 
 def run_pci(icon=-1):
