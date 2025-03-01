@@ -13,10 +13,13 @@ import ida_offset
 import ida_name
 import ida_ida
 
+ida_9_or_later = False
 try:
+    import ida_struct
     from ida_struct import get_member_by_name
 except ModuleNotFoundError:
     # for IDA 9.0
+    ida_9_or_later = True
     def get_member_by_name(tif, name):
         if not tif.is_struct():
             return None
@@ -131,11 +134,44 @@ class utils(object):
             for xref in utils.get_refs_to(tif.get_tid()):
                 yield xref
                 
-    def add_ptr_or_rva_member(self, sid, name):
+    def add_ptr_or_rva_member(self, sid, mname, mtype_name, array=False, idx=-1):
+        sname = idc.get_struc_name(sid)
+        
+        # if idx is not specified, insert the member at the end of the structure
+        if idx < 0:
+            idx = idc.get_member_qty(sid)
+            
+        idc.add_struc_member(sid, mname, ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, -1, 4)
+        self.set_ptr_or_rva_member(sid, mname, mtype_name, array, idx)
+        
+    def set_ptr_or_rva_member(self, sid, mname, mtype_name, array=False, idx=-1):
+        sname = idc.get_struc_name(sid)
+        
+        # if idx is not specified, modifie the last member
+        if idx < 0:
+            idx = idc.get_member_qty(sid) - 1
+            
+        r = None
         if self.x64:
-            idc.add_struc_member(sid, name, ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, self.mt_rva().tid, 4, reftype=ida_nalt.REFINFO_RVAOFF|self.REF_OFF)
+            reftype = ida_nalt.REFINFO_RVAOFF|self.REF_OFF
+            mtif = get_ptr_type(mtype_name, ptr_size=ida_typeinf.TAPTR_PTR32, array=array)
+            if ida_9_or_later:
+                r = get_val_repr(ida_typeinf.FRB_OFFSET, reftype)
         else:
-            idc.add_struc_member(sid, name, ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, self.mt_address().tid, 4)
+            reftype = self.REF_OFF
+            mtif = get_ptr_type(mtype_name, ptr_size=0, array=array)
+            
+        if ida_9_or_later:
+            tif = ida_typeinf.tinfo_t()
+            tif.get_named_type(None, sname)
+            udt = ida_typeinf.udt_type_data_t()
+            if tif.get_udt_details(udt):
+                tif.set_udm_type(idx, mtif, 0, r)
+                tif.get_udt_details(udt)
+        else:
+            s = ida_struct.get_struc(sid)
+            ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
+            idc.set_member_type(sid, idc.get_member_offset(sid, mname), ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, -1, 1, reftype=reftype)
         
     @staticmethod
     def get_moff_by_name(struc, name):
@@ -227,10 +263,21 @@ def create_ptr_attr(data_type=ida_typeinf.BTF_INT, attr=ida_typeinf.TAPTR_PTR32)
     return mtif
 
 
-def get_ptr_type(type_name, ptr_size=ida_typeinf.TAPTR_PTR32):
+def get_ptr_type(type_name, ptr_size=ida_typeinf.TAPTR_PTR32, array=False):
     mtif = ida_typeinf.tinfo_t()
     if mtif.get_named_type(None, type_name):
-        mtif = create_ptr_attr(ida_typeinf.BTF_INT, ptr_size)
+        # for 64-bit, the member stores an RVA.
+        # create "*__ptr32" here.
+        if ptr_size:
+            mtif = create_ptr_attr(mtif, ptr_size)
+        # for 32-bit, the member stores a pointer.
+        # just create a pointer
+        else:
+            mtif.create_ptr(mtif)
+            
+        # for BCA
+        if array:
+            mtif.create_array(mtif)
         return mtif
     return None
 

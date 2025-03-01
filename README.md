@@ -2,7 +2,7 @@
 #### Yet Another RTTI Parsing IDA plugin ####
 ![PyClassInformer Icon](/pyclassinformer/pci_icon.png)
 
-PyClassInformer is an RTTI parser. Although there are several RTTI parsers such as Class Informer and SusanRTTI, and even IDA can also parse RTTI, I created this tool. It is because they cannot be used as libraries for parsing RTTI. IDA cannot show class hierarchies, either.
+PyClassInformer is an RTTI parser. Although there are several RTTI parsers such as Class Informer and SusanRTTI, and even IDA can also parse RTTI, I created this tool. It is because they cannot be used as libraries for parsing RTTI. IDA cannot easily manage class hierarchies such as checking them as a list and filtering the information, either.
 
 PyClassInformer can parse RTTI for Windows on x86 and x64. Since it is written in IDAPython, you can run it on IDA for Mac OS and Linux as well as Windows. You can also use results of parsing RTTI in your python code by importing this tool as a library.
 

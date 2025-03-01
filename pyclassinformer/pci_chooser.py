@@ -40,20 +40,20 @@ class pci_chooser_t(ida_kernwin.Choose):
         col = data[vftable_ea]
         col_offs, curr_off = u.get_col_offs(col, data)
         result = "{}: ".format(col.name)
-        if len(col.chd.bases) > 0:
+        if len(col.chd.bca.bases) > 0:
             idx = 0
-            if col.chd.bases[0].name == col.name:
+            if col.chd.bca.bases[0].name == col.name:
                 idx = 1
             # get the result related to the offset of the COL
-            result += ", ".join([x.name for x in col.chd.bases[idx:] if u.does_bcd_append(col_offs, x, curr_off)]) + ";" if len(col.chd.bases) > 1 else ""
+            result += ", ".join([x.name for x in col.chd.bca.bases[idx:] if u.does_bcd_append(col_offs, x, curr_off)]) + ";" if len(col.chd.bca.bases) > 1 else ""
         return result
         
     def get_hierarychy_order(self, data, vftable_ea):
         col = data[vftable_ea]
         col_offs, curr_off = u.get_col_offs(col, data)
         result = []
-        if len(col.chd.bases) > 0:
-            for off in col.chd.paths:
+        if len(col.chd.bca.bases) > 0:
+            for off in col.chd.bca.paths:
                 target_off = off
                 if off not in col_offs:
                     # sometimes, mdisp is not included in COLs.
@@ -61,7 +61,7 @@ class pci_chooser_t(ida_kernwin.Choose):
                     target_off = 0
                     if len(col_offs) > 0:
                         target_off = sorted(col_offs)[0]
-                for p in col.chd.paths[off]:
+                for p in col.chd.bca.paths[off]:
                     #if curr_off == target_off or col.chd.flags.find("V") >= 0 or len(list(filter(lambda x: x.pdisp >= 0, p))) > 0:
                     if curr_off == target_off:
                         result.append("{:#x}: ".format(off) + " -> ".join([x.name + " ({},{},{})".format(x.mdisp, x.pdisp, x.vdisp) for x in p]))

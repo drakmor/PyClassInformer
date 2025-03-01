@@ -44,6 +44,7 @@ def strip(name):
 
 
 class RTTITypeDescriptor(RTTIStruc):
+    
     # create structure
     msid = idc.get_struc_id("RTTITypeDescriptor")
     if msid != ida_idaapi.BADADDR:
@@ -98,7 +99,61 @@ class RTTITypeDescriptor(RTTIStruc):
         return
 
 
+class RTTIClassHierarchyDescriptor(RTTIStruc):
+    
+    CHD_MULTINH   = 0x01 # Multiple inheritance
+    CHD_VIRTINH   = 0x02 # Virtual inheritance
+    CHD_AMBIGUOUS = 0x04 # Ambiguous inheritance
+    
+    # create structure
+    msid = idc.get_struc_id("RTTIClassHierarchyDescriptor")
+    if msid != ida_idaapi.BADADDR:
+        idc.del_struc(msid)
+    msid = idc.add_struc(0xFFFFFFFF, "RTTIClassHierarchyDescriptor", False)
+
+    # add members
+    idc.add_struc_member(msid, "signature", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
+    idc.add_struc_member(msid, "attribute", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
+    idc.add_struc_member(msid, "numBaseClasses", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
+    idc.add_struc_member(msid, "pBaseClassArray", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4) # for dummy. the correct type will be applied when the BCA class is created.
+    
+    # get structure related info
+    tid = msid
+    struc = get_struc(tid)
+    size = idc.get_struc_size(tid)
+    print("Completed Registering RTTIClassHierarchyDescriptor")
+
+    def __init__(self, ea):
+        self.ea = ea
+        self.sig = 0
+        self.bcaea = ida_idaapi.BADADDR
+        self.nb_classes = 0
+        self.flags = ""
+        self.bca = None
+        
+        # apply structure type to bytes
+        ida_bytes.del_items(ea, ida_bytes.DELIT_DELNAMES, self.size)
+        if ida_bytes.create_struct(ea, self.size, self.tid):
+            # Get members of CHD
+            self.sig = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "signature"))
+            self.bcaea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pBaseClassArray")) + u.x64_imagebase()
+            self.nb_classes = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "numBaseClasses"))
+            self.attribute = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "attribute"))
+            
+            self.bca = RTTIBaseClassArray(self.bcaea, self.nb_classes)
+            
+            # parse flags
+            if self.attribute & self.CHD_MULTINH:
+                self.flags += "M"
+            if self.attribute & self.CHD_VIRTINH:
+                self.flags += "V"
+            if self.attribute & self.CHD_AMBIGUOUS:
+                self.flags += "A"
+            #self.flags += " {:#x}".format(self.attribute)
+        
+
 class RTTIBaseClassDescriptor(RTTIStruc):
+    
     BCD_NOTVISIBLE = 0x00000001
     BCD_AMBIGUOUS = 0x00000002
     BCD_PRIVORPROTBASE = 0x00000004
@@ -114,13 +169,13 @@ class RTTIBaseClassDescriptor(RTTIStruc):
     msid = idc.add_struc(0xFFFFFFFF, "RTTIBaseClassDescriptor", False)
     
     # add members
-    u.add_ptr_or_rva_member(msid, "pTypeDescriptor")
+    u.add_ptr_or_rva_member(msid, "pTypeDescriptor", "RTTITypeDescriptor")
     idc.add_struc_member(msid, "numContainerBases", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
     idc.add_struc_member(msid, "mdisp", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4) # 00 PMD Vftable displacement inside class layout
     idc.add_struc_member(msid, "pdisp", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4) # 04 PMD Vbtable displacement
     idc.add_struc_member(msid, "vdisp", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4) # 08 PMD Vftable displacement inside vbtable
     idc.add_struc_member(msid, "attributes", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
-    u.add_ptr_or_rva_member(msid, "pClassDescriptor")
+    u.add_ptr_or_rva_member(msid, "pClassDescriptor", "RTTIClassHierarchyDescriptor")
     
     # get structure related info
     tid = msid
@@ -140,39 +195,35 @@ class RTTIBaseClassDescriptor(RTTIStruc):
             self.pdisp = u.to_signed32(ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pdisp")))
             self.vdisp = u.to_signed32(ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "vdisp")))
             self.attributes = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "attributes"))
-            self.rcd = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pClassDescriptor"))
+            self.chdea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pClassDescriptor")) + u.x64_imagebase()
                 
 
-class RTTIClassHierarchyDescriptor(RTTIStruc):
-    bases = None
-    CHD_MULTINH   = 0x01 # Multiple inheritance
-    CHD_VIRTINH   = 0x02 # Virtual inheritance
-    CHD_AMBIGUOUS = 0x04 # Ambiguous inheritance
+class RTTIBaseClassArray(RTTIStruc):
     
     # create structure
-    msid = idc.get_struc_id("RTTIClassHierarchyDescriptor")
+    msid = idc.get_struc_id("RTTIBaseClassArray")
     if msid != ida_idaapi.BADADDR:
         idc.del_struc(msid)
-    msid = idc.add_struc(0xFFFFFFFF, "RTTIClassHierarchyDescriptor", False)
+    msid = idc.add_struc(0xFFFFFFFF, "RTTIBaseClassArray", False)
 
     # add members
-    idc.add_struc_member(msid, "signature", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
-    idc.add_struc_member(msid, "attribute", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
-    idc.add_struc_member(msid, "numBaseClasses", ida_idaapi.BADADDR, ida_bytes.FF_DWORD|ida_bytes.FF_DATA, -1, 4)
-    u.add_ptr_or_rva_member(msid, "pBaseClassArray")
+    u.add_ptr_or_rva_member(msid, "arrayOfBaseClassDescriptors", "RTTIBaseClassDescriptor", array=True)
     
     # get structure related info
     tid = msid
     struc = get_struc(tid)
     size = idc.get_struc_size(tid)
-    print("Completed Registering RTTIClassHierarchyDescriptor")
+    
+    # correct BCA's pBaseClassArray member type here.
+    u.set_ptr_or_rva_member(RTTIClassHierarchyDescriptor.tid, "pBaseClassArray", "RTTIBaseClassArray")
+    
+    print("Completed Registering RTTIBaseClassArray")
 
-    def __init__(self, ea):
+    def __init__(self, ea, nb_classes):
         self.ea = ea
-        self.sig = 0
-        self.bcaea = ida_idaapi.BADADDR
-        self.nb_classes = 0
-        self.flags = ""
+        # fix the size with the actual size by using nb_classes from CHD since the size depends on each BCA
+        self.size = 4 * nb_classes
+
         self.bases = []
         self.paths = {}
         self.depth = 0
@@ -180,34 +231,21 @@ class RTTIClassHierarchyDescriptor(RTTIStruc):
         # apply structure type to bytes
         ida_bytes.del_items(ea, ida_bytes.DELIT_DELNAMES, self.size)
         if ida_bytes.create_struct(ea, self.size, self.tid):
-            # Get members of CHD
-            self.sig = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "signature"))
-            self.bcaea = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "pBaseClassArray")) + u.x64_imagebase()
-            self.nb_classes = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "numBaseClasses"))
-            self.attribute = ida_bytes.get_32bit(ea+u.get_moff_by_name(self.struc, "attribute"))
-            
-            # parse flags
-            if self.attribute & self.CHD_MULTINH:
-                self.flags += "M"
-            if self.attribute & self.CHD_VIRTINH:
-                self.flags += "V"
-            if self.attribute & self.CHD_AMBIGUOUS:
-                self.flags += "A"
-            #self.flags += " {:#x}".format(self.attribute)
-            
-    def parse_bca(self, ea):
+            pass
+        
+    def parse_bca(self, ea, nb_classes):
         result_paths = {}
         curr_path = []
         n_processed = {}
-        for i in range(0, self.nb_classes):
-            bcdoff = self.bcaea+i*4
+        for i in range(0, nb_classes):
+            bcdoff = ea+i*4
             
             # apply data type to items in BCA
-            ida_bytes.create_dword(bcdoff, 4)
-            if u.x64:
-                ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF|ida_nalt.REFINFO_RVAOFF, -1, 0, 0)
-            else:
-                ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF, -1, 0, 0)
+            #ida_bytes.create_dword(bcdoff, 4)
+            #if u.x64:
+            #    ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF|ida_nalt.REFINFO_RVAOFF, -1, 0, 0)
+            #else:
+            #    ida_offset.op_offset(bcdoff, ida_bytes.OPND_MASK, u.REF_OFF, -1, 0, 0)
                     
             # get relevant structures
             bcdea = ida_bytes.get_32bit(bcdoff) + u.x64_imagebase()
@@ -258,7 +296,7 @@ class RTTIClassHierarchyDescriptor(RTTIStruc):
         
         #print({x:[[z.name for z in y] for y in result_paths[x]] for x in result_paths})
         self.paths = result_paths
-        
+
 
 class RTTICompleteObjectLocator(RTTIStruc):
 
@@ -272,10 +310,11 @@ class RTTICompleteObjectLocator(RTTIStruc):
     idc.add_struc_member(msid, "signature", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4)
     idc.add_struc_member(msid, "offset", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4)
     idc.add_struc_member(msid, "cdOffset", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD, -1, 4)
-    u.add_ptr_or_rva_member(msid, "pTypeDescriptor")
-    u.add_ptr_or_rva_member(msid, "pClassDescriptor")
+    u.add_ptr_or_rva_member(msid, "pTypeDescriptor", "RTTITypeDescriptor")
+    u.add_ptr_or_rva_member(msid, "pClassDescriptor", "RTTIClassHierarchyDescriptor")
     if u.x64:
-        idc.add_struc_member(msid, "pSelf", ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, u.mt_rva().tid, 4, reftype=ida_nalt.REFINFO_RVAOFF|u.REF_OFF)
+        u.add_ptr_or_rva_member(msid, "pSelf", "RTTICompleteObjectLocator")
+        
             
     # get structure related info
     tid = msid
@@ -353,7 +392,7 @@ def parse_msvc_vftable():
     if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) == 0:
         [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
     if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) == 0:
-        [ida_bytes.create_struct(result[x].td.ea, RTTITypeDescriptor.size, RTTITypeDescriptor.tid, True) for x in result]
+        [ida_bytes.create_struct(result[x].td.ea, result[x].td.size, RTTITypeDescriptor.tid, True) for x in result]
         
     # for refreshing xrefs to get xrefs from COLs to TDs
     ida_auto.auto_wait()
@@ -363,8 +402,16 @@ def parse_msvc_vftable():
         col = result[vtable]
         
         # get BCDs
-        for bcd, depth in col.chd.parse_bca(col.chd.bcaea):
+        for bcd, depth in col.chd.bca.parse_bca(col.chd.bca.ea, col.chd.nb_classes):
             pass
+        
+    # may be this is a bug on IDA.
+    # ida fails to apply a structure type to bytes under some conditions, although create_struct returns True.
+    # to avoid that, apply them again.
+    ida_auto.auto_wait()
+    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) == 0:
+        [ida_bytes.create_struct(result[x].chd.bca.ea, result[x].chd.bca.size, RTTIBaseClassArray.tid, True) for x in result]
+    ida_auto.auto_wait()
             
     return result
 
@@ -377,8 +424,8 @@ def display_result(result):
         print("  CHD at {:#x}:".format(col.chd.ea), hex(col.chd.sig), hex(col.chd.bcaea), col.chd.nb_classes, col.chd.flags)
         
         # get BCDs
-        for bcd in col.chd.bases:
-            print("    {}BCD at {:#x}:".format(" " *bcd.depth*2, bcd.ea), bcd.name, bcd.nb_cbs, bcd.mdisp, bcd.pdisp, bcd.vdisp, bcd.attributes)
+        for bcd in col.chd.bca.bases:
+            print("    {}BCD at {:#x}:".format(" " *bcd.depth*2, bcd.ea), bcd.name, bcd.nb_cbs, bcd.mdisp, bcd.pdisp, bcd.vdisp, bcd.attributes, hex(bcd.chdea))
 
 
 def run_pci(icon=-1):
