@@ -420,11 +420,16 @@ def parse_msvc_vftable():
     ida_auto.auto_wait()
     
     # for debugging
-    #print(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result]))
-    #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
-    #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases])))
-    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result])))
-    #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases])))
+    if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) != len([result[x].ea for x in result]):
+        print("Warning: RTTICompleteObjectLocator found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result])))
+    if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
+        print("Warning: RTTIClassHierarchyDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result]))))
+    if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
+        print("Warning: RTTITypeDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases]))))
+    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) != len(set([result[x].chd.bca.ea for x in result])):
+        print("Warning: RTTIBaseClassArray found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result]))))
+    if len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]) != len(set([y.ea for x in result for y in result[x].chd.bca.bases])):
+        print("Warning: RTTIBaseClassDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases]))))
     return result
 
 
