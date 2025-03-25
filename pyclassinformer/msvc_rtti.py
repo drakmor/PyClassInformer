@@ -11,6 +11,11 @@ import ida_name
 import ida_ida
 import ida_idp
 
+try:
+    ModuleNotFoundError
+except NameError:
+    ModuleNotFoundError = ImportError
+
 ida_9_or_later = False
 try:
     from ida_struct import get_struc
@@ -235,7 +240,7 @@ class RTTIBaseClassArray(RTTIStruc):
             pass
         
     # Sometimes, mdisp value is not included in COLs' offsets.
-    # In that case, use either one of the following:
+    # In that case, use either one of the followings:
     #   - zero (before iterating BCA)
     #   - in the middle of the BCD's mdisp of a path (for MI with multiple vftables)
     #   - least COL's offset (for other cases such as SI and MI with a single vftable)

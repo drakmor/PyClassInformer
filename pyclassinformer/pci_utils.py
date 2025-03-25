@@ -13,6 +13,11 @@ import ida_offset
 import ida_name
 import ida_ida
 
+try:
+    ModuleNotFoundError
+except NameError:
+    ModuleNotFoundError = ImportError
+
 ida_9_or_later = False
 try:
     import ida_struct
