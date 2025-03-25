@@ -26,7 +26,7 @@ You will need at least IDA Pro 7.4 or later because of the APIs that I use. If y
 ## Features (short)
 - Display class names, vftables and class hierarchies as a list
 - Display RTTI parsed results on the Output window
-- Display vftables, class names, virtual methods, possilbe constructors and destructors, and class hierarchies as a dir tree (IDA 7.7 or later)
+- Display vftables, class names, virtual methods, possible constructors and destructors, and class hierarchies as a dir tree (IDA 7.7 or later)
 - Create directories for classes and move virtual methods to them in Functions and Names subviews (IDA 7.7 or later)
 - Move functions refer vftables to "possible ctors or dtors" folder under each class directory in Functions and Names subviews (IDA 7.7 or later)
 - Rename virtual methods by appending class names to them
@@ -72,14 +72,14 @@ The detected methods are moved to each class folder in Functions and Names subvi
   
 ![method classifications](/images/classification.png)  
   
-PyClassInformer also displays a new widget named "Method Classifier". It lists all detected classes, vftables, virtual methods and possible constructors and destructors, and class herarchies at once as a form of a tree.  
+PyClassInformer also displays a new widget named "Method Classifier". It lists all detected classes, vftables, virtual methods and possible constructors and destructors, and class hierarchies at once as a form of a tree.  
 
 ![method classifier](/images/method_classifier.png)  
 
 > [!TIP]
 > Class hierarchies are represented as directories in Method Classifier.
-> Unfortunaltely, IDA's quick filter feature cannot filter directory contents.
-> To search them, use text search feture (Ctrl+T (find first text) and Alt+T (Find next text)).
+> Unfortunately, IDA's quick filter feature cannot filter directory contents.
+> To search them, use text search feature (Ctrl+T (find first text) and Alt+T (Find next text)).
 > For example, input a class name, a single space, and a parenthesis like "CWinApp (".
 
 > [!NOTE]
@@ -88,7 +88,7 @@ PyClassInformer also displays a new widget named "Method Classifier". It lists a
 ### Known classes detection (<= IDA 8.3)
 PyClassInformer can color known class names for easily finding user-defined classes.
 The image below is an example of a coloring result.  
-You can easily find CSimpleTestApp, CSimpleTestDoc, CSimpleTestView and CSimpleTestCtrlItem are user-defined classes. So you can forcus on checking them.  
+You can easily find CSimpleTestApp, CSimpleTestDoc, CSimpleTestView and CSimpleTestCtrlItem are user-defined classes. So you can focus on checking them.  
   
 ![Class coloring](/images/coloring.png)  
 
