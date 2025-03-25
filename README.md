@@ -92,7 +92,8 @@ You can easily find CSimpleTestApp, CSimpleTestDoc, CSimpleTestView and CSimpleT
   
 ![Class coloring](/images/coloring.png)  
 
-The coloring is also applied to Method Classifier widget. Therefore, you can easily find overridden virtual methods like the image below.
+The coloring is also applied to Method Classifier widget. Therefore, you can easily find overridden virtual methods like the image below.  
+
 ![Methods coloring](/images/overridden_methods.png)  
   
 > [!NOTE]
