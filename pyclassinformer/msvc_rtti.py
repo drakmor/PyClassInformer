@@ -240,7 +240,7 @@ class RTTIBaseClassArray(RTTIStruc):
             pass
         
     # Sometimes, mdisp value is not included in COLs' offsets.
-    # In that case, use either one of the followings:
+    # In that case, use either one of the following:
     #   - zero (before iterating BCA)
     #   - in the middle of the BCD's mdisp of a path (for MI with multiple vftables)
     #   - least COL's offset (for other cases such as SI and MI with a single vftable)
