@@ -49,10 +49,15 @@ class utils(object):
         self.data = ida_segment.get_segm_by_name(".data")
         self.rdata = ida_segment.get_segm_by_name(".rdata")
         # try to use rdata if there actually is an rdata segment, otherwise just use data
-        if self.rdata is not None:
+        if self.rdata is not None and self.data is not None:
             self.valid_ranges = [(self.rdata.start_ea, self.rdata.end_ea), (self.data.start_ea, self.data.end_ea)]
+        # fail safe for renaming segment names
         else:
-            self.valid_ranges = [(self.data.start_ea, self.data.end_ea)]
+            self.valid_ranges = []
+            for n in range(ida_segment.get_segm_qty()):
+                seg = ida_segment.getnseg(n)
+                if seg and ida_segment.get_segm_class(seg) == "DATA" and seg and not seg.is_header_segm():
+                    self.valid_ranges.append((seg.start_ea, seg.end_ea))
 
         self.x64 = (ida_segment.getnseg(0).bitness == 2)
         if self.x64:
@@ -65,6 +70,18 @@ class utils(object):
             self.REF_OFF = ida_nalt.REF_OFF32
             self.PTR_SIZE = 4
             self.get_ptr = ida_bytes.get_32bit
+            
+    @staticmethod
+    def get_data_segments():
+        for n in range(ida_segment.get_segm_qty()):
+            seg = ida_segment.getnseg(n)
+            if seg and ida_segment.get_segm_class(seg) == "DATA" and seg and not seg.is_header_segm():
+                yield seg
+            
+    def update_valid_ranges(self):
+        self.valid_ranges = []
+        for seg in utils.get_data_segments():
+            self.valid_ranges.append((seg.start_ea, seg.end_ea))
 
     # for 32-bit binaries, the RTTI structs contain absolute addresses, but for
     # 64-bit binaries, they're offsets from the image base.
@@ -73,31 +90,7 @@ class utils(object):
             return ida_nalt.get_imagebase()
         else:
             return 0
-
-    def mt_rva(self):
-        ri = ida_nalt.refinfo_t()
-        ri.flags = self.REF_OFF|ida_nalt.REFINFO_RVAOFF
-        ri.target = 0
-        mt = ida_nalt.opinfo_t()
-        mt.ri = ri
-        return mt
-
-    def mt_address(self):
-        ri = ida_nalt.refinfo_t()
-        ri.flags = self.REF_OFF
-        ri.target = 0
-        mt = ida_nalt.opinfo_t()
-        mt.ri = ri
-        return mt
-
-    def mt_ascii(self):
-        ri = ida_nalt.refinfo_t()
-        ri.flags = ida_nalt.STRTYPE_C
-        ri.target = -1
-        mt = ida_nalt.opinfo_t()
-        mt.ri = ri
-        return mt
-
+        
     def get_strlen(self, addr, max_len=500):
         # 50 is sometimes too short. I increased a number here.
         strlen = 0
@@ -165,9 +158,8 @@ class utils(object):
             tif = ida_typeinf.tinfo_t()
             tif.get_named_type(None, sname)
             udt = ida_typeinf.udt_type_data_t()
-            if tif.get_udt_details(udt):
-                tif.set_udm_type(idx, mtif, 0, r)
-                tif.get_udt_details(udt)
+            tif.set_udm_type(idx, mtif, 0, r)
+            tif.get_udt_details(udt)
         else:
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
@@ -181,23 +173,7 @@ class utils(object):
             # for ida 9.0
             offset = get_member_by_name(struc, name).offset // 8
         return offset
-        
-    @staticmethod
-    def does_bcd_append(col_offs, bcd, curr_off):
-        append = False
-        # for single inheritance
-        if len(col_offs) <= 1:
-            append = True
-        # for multiple inheritance
-        elif bcd.mdisp in col_offs:
-            if bcd.mdisp == curr_off:
-                append = True
-        # for items that are not matched with COL offsets
-        # they are treated as a part of COL offset 0
-        elif curr_off == 0:
-            append = True
-        return append
-        
+    
     @staticmethod
     def get_col_offs(col, vftables):
         # get offsets in COLs by finding xrefs for multiple inheritance
@@ -209,8 +185,27 @@ class utils(object):
         cols = list(filter(lambda x: x.ea in coleas, vftables.values()))
         # get the offsets in COLs
         col_offs = [ida_bytes.get_32bit(x.ea+utils.get_moff_by_name(x.struc, "offset")) for x in cols]
-        curr_off = col.offset
-        return col_offs, curr_off
+        return col_offs
+
+    @staticmethod
+    def get_mdisp_bases(col, vftables):
+        # for checking if a class has multiple vftables or not
+        col_offs = utils.get_col_offs(col, vftables)
+        
+        bases = []
+        for path in col.chd.bca.paths[col.offset]:
+            append = False
+            for bcd in path:
+                # for SI and MI but there is only a vftable
+                if len(col_offs) < 2:
+                    append = True
+                # for MI and there are multiple vftables
+                elif bcd.mdisp == col.offset:
+                    append = True
+                # if append flag is enabled, append it and subsequent BCDs after it
+                if append and bcd not in bases:
+                    bases.append(bcd)
+        return bases
 
 
 def add_struc_by_name_and_def(name, struc_def):
@@ -236,6 +231,7 @@ def build_udm(name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1, vrepr=None):
         udm.set_value_repr(vrepr)
         
     return udm
+
 
 def add_struc(name):
     tif = ida_typeinf.tinfo_t()
