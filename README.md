@@ -32,7 +32,7 @@ You will need at least IDA Pro 7.4 or later because of the APIs that I use. If y
 - Rename virtual methods by appending class names to them
 - Add the FUNC_LIB flag to methods that known classes own
 - Rename possible constructors and destructors
-- Coloring known class names and their methods on the list and the tree widgets
+- Coloring known class names and their methods on the list and the tree widgets (IDA 8.3 or later)
 
 ## Features in detail
 ### Default output
@@ -103,7 +103,7 @@ Known class names are defined in "lib_classes.json". I added many patterns relat
 If you find some additional legitimate classes, you can add them to it.  
 
 PyClassInformer also adds the FUNC_LIB flag to the methods that match the list. Therefore, you can recognize they are a part of static linked libraries.  
-The following images are before and after PyClassInformer execution. Many known class methods are found and IDA can recognize them a part of static linked libraries.  
+The following images are before and after PyClassInformer execution. Many known class methods are found and IDA can recognize them as a part of static linked libraries.  
   
 ![Methods coloring](/images/before_libflag_applied.png)  
 ![Methods coloring](/images/after_libflag_applied.png)  
