@@ -79,6 +79,7 @@ class pci_plugin_t(ida_idaapi.plugin_t):
         ida_kernwin.delete_toolbar(self.toolbar_name)
         ida_kernwin.unregister_action(self.action_name)
         ida_kernwin.detach_action_from_menu(self.menu_path, self.action_name)
+        ida_kernwin.free_custom_icon(self.act_icon)
         
     @staticmethod
     def run_pci(icon=-1):
