@@ -6,8 +6,9 @@ import ida_name
 import idautils
 import ida_funcs
 
-ida_idaapi.require("pci_utils")
-ida_idaapi.require("dirtree_utils")
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.pci_utils")
+ida_idaapi.require("pyclassinformer.dirtree_utils")
 
 # dirspec for the dirtree
 class my_dirspec_t(ida_dirtree.dirspec_t):
@@ -116,7 +117,7 @@ class mc_tree_t(ida_kernwin.Choose):
             self.dirtree.mkdir(dp)
             
             # if the class has multiple vftables, create a nested folder
-            col_offs = pci_utils.utils.get_col_offs(col, self.data)
+            col_offs = pyclassinformer.pci_utils.utils.get_col_offs(col, self.data)
             if len(col_offs) > 1:
                 # if the class has multiple vftables, create a nested folder with the actual class name
                 if class_name != actual_class_name:
@@ -201,8 +202,8 @@ class mc_tree_t(ida_kernwin.Choose):
         # get inode and get the current dir and the cached entry
         inode = self.OnIndexToInode(sel)
         curr_dir, name = self.dirspec.get_name_idx(inode)
-        abs_path = dirtree_utils.get_abs_path_by_inode(self.dirtree, inode)
-        parent_dir = dirtree_utils.get_parent_dir_by_inode(self.dirtree, inode) + "/" # add slash at the end
+        abs_path = pyclassinformer.dirtree_utils.get_abs_path_by_inode(self.dirtree, inode)
+        parent_dir = pyclassinformer.dirtree_utils.get_parent_dir_by_inode(self.dirtree, inode) + "/" # add slash at the end
         
         # need to update the directory in the cached inodes if the current dir and the parent dir of the selection are not matched.
         #print("OnSelectionChange", sel, inode, curr_dir, name, abs_path, parent_dir)

@@ -29,9 +29,9 @@ except ModuleNotFoundError:
                 return tif
         return None
 
-
-ida_idaapi.require("pci_utils")
-u = pci_utils.utils()
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.pci_utils")
+u = pyclassinformer.pci_utils.utils()
 
 
 class RTTIStruc(object):
@@ -384,7 +384,7 @@ class RTTICompleteObjectLocator(RTTIStruc):
                 # parse relevant structures
                 self.td = td
                 self.chd = RTTIClassHierarchyDescriptor(self.chdea)
-                self.vfeas = [x for x in pci_utils.get_vtbl_methods(vtable)]
+                self.vfeas = [x for x in pyclassinformer.pci_utils.get_vtbl_methods(vtable)]
                 
                 # set class name
                 self.name = strip(self.td.class_name)

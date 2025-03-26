@@ -1,30 +1,31 @@
 import ida_idaapi
 import ida_kernwin
 
-ida_idaapi.require("msvc_rtti")
-ida_idaapi.require("pci_config")
-ida_idaapi.require("pci_chooser")
-ida_idaapi.require("method_classifier")
-ida_idaapi.require("lib_classes_checker")
-ida_idaapi.require("get_func_colors")
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.msvc_rtti")
+ida_idaapi.require("pyclassinformer.pci_config")
+ida_idaapi.require("pyclassinformer.pci_chooser")
+ida_idaapi.require("pyclassinformer.method_classifier")
+ida_idaapi.require("pyclassinformer.lib_classes_checker")
+ida_idaapi.require("pyclassinformer.get_func_colors")
 
 def run_pci(config=None, icon=-1):
     print("Starting PyClassInformer")
     if config is None:
-        config = pci_config.pci_config()
+        config = pyclassinformer.pci_config.pci_config()
     
     # find vftables with relevant structures
-    result = msvc_rtti.rtti_parser.run(alldata=config.alldata, icon=-1)
+    result = pyclassinformer.msvc_rtti.rtti_parser.run(alldata=config.alldata, icon=-1)
     
     # show results
     tree = None
     if result:
         if config.rtti:
-            msvc_rtti.rtti_parser.show(result)
-        lib_classes_checker.set_libflag(result)
-        gen_func_color, lib_func_color = get_func_colors.get_gen_lib_func_colors()
-        pci_chooser.show_pci_chooser_t(result, icon=icon, libcolor=lib_func_color, defcolor=gen_func_color)
-        tree = method_classifier.method_classifier(result, config=config, icon=icon)
+            pyclassinformer.msvc_rtti.rtti_parser.show(result)
+        pyclassinformer.lib_classes_checker.set_libflag(result)
+        gen_func_color, lib_func_color = pyclassinformer.get_func_colors.get_gen_lib_func_colors()
+        pyclassinformer.pci_chooser.show_pci_chooser_t(result, icon=icon, libcolor=lib_func_color, defcolor=gen_func_color)
+        tree = pyclassinformer.method_classifier.method_classifier(result, config=config, icon=icon)
         
         # dock the tree to next to functions
         if tree:

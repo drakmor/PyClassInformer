@@ -65,14 +65,15 @@ class pci_form_t(ida_kernwin.Form):
         
     @staticmethod
     def show():
-        ida_idaapi.require("pci_config")
-        pcic = pci_config.pci_config()
+        ida_idaapi.require("pyclassinformer")
+        ida_idaapi.require("pyclassinformer.pci_config")
+        pcic = pyclassinformer.pci_config.pci_config()
         f = pci_form_t(dirtree=pcic.dirtree)
 
         # Execute the form
         ok = f.Execute()
         if ok == 1:
-            pcic = pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked)
+            pcic = pyclassinformer.pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked)
         else:
             return None
 
@@ -81,6 +82,7 @@ class pci_form_t(ida_kernwin.Form):
         return pcic
 
 """
+ida_idaapi.require("pci_config")
 pcic = pci_form_t.show()
 if pcic is not None:
     print(pcic.alldata, pcic.exana, pcic.mvvm, pcic.mvcd, pcic.rnvm, pcic.rncd)

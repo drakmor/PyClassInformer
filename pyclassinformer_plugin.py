@@ -6,10 +6,9 @@ import sys
 
 dirpath = os.path.dirname(os.path.abspath(__file__))
 script_dir = os.path.join(dirpath, "pyclassinformer")
-if script_dir not in sys.path:
-    sys.path.append(script_dir)
 
-ida_idaapi.require("qtutils")
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.qtutils")
 
 class pci_plugin_t(ida_idaapi.plugin_t):
     flags = ida_idaapi.PLUGIN_KEEP
@@ -61,7 +60,7 @@ class pci_plugin_t(ida_idaapi.plugin_t):
         ida_kernwin.attach_action_to_toolbar(self.toolbar_name, self.action_name)
         
         # install ui hook to enable toolbar later
-        self.ph = qtutils.enable_toolbar_t(self.toolbar_name)
+        self.ph = pyclassinformer.qtutils.enable_toolbar_t(self.toolbar_name)
         
     def init(self):
         ida_kernwin.msg("############### %s (%s) ###############%s" % (self.wanted_name, self.comment, os.linesep))
@@ -83,11 +82,11 @@ class pci_plugin_t(ida_idaapi.plugin_t):
         
     @staticmethod
     def run_pci(icon=-1):
-        ida_idaapi.require("pci_config_form")
-        config = pci_config_form.pci_form_t.show()
+        ida_idaapi.require("pyclassinformer.pci_config_form")
+        config = pyclassinformer.pci_config_form.pci_form_t.show()
         if config is not None:
-            ida_idaapi.require("pyclassinformer")
-            pyclassinformer.run_pci(config=config, icon=icon)
+            ida_idaapi.require("pyclassinformer.pyclassinformer")
+            pyclassinformer.pyclassinformer.run_pci(config=config, icon=icon)
         else:
             print("PyClassInformer: Canceled")
 

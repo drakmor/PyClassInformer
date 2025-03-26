@@ -2,8 +2,9 @@ import idc
 import ida_kernwin
 import ida_idaapi
 
-ida_idaapi.require("pci_utils")
-u = pci_utils.utils()
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.pci_utils")
+u = pyclassinformer.pci_utils.utils()
 
 class pci_chooser_t(ida_kernwin.Choose):
 

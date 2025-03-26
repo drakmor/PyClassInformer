@@ -2,7 +2,8 @@ import ida_kernwin
 import ida_funcs
 import ida_idaapi
 
-ida_idaapi.require("qtutils")
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.qtutils")
 
 
 def get_chooser_data(chooser="Functions"):
@@ -60,7 +61,7 @@ def get_gen_lib_func_colors():
         dark = False
         # check if dark mode is enabled or not
         try:
-            dark = qtutils.dark_mode_checker_t.is_dark_mode()
+            dark = pyclassinformer.qtutils.dark_mode_checker_t.is_dark_mode()
         except:
             pass
         # set the default dark mode color on IDA

@@ -19,12 +19,12 @@ except ModuleNotFoundError:
 except AttributeError:
     tree_categorize = False
 
-ida_idaapi.require("pci_utils")
-ida_idaapi.require("pci_config")
-ida_idaapi.require("lib_classes_checker")
+ida_idaapi.require("pyclassinformer")
+ida_idaapi.require("pyclassinformer.pci_utils")
+ida_idaapi.require("pyclassinformer.pci_config")
 if tree_categorize:
-    ida_idaapi.require("mc_tree")
-    ida_idaapi.require("dirtree_utils")
+    ida_idaapi.require("pyclassinformer.mc_tree")
+    ida_idaapi.require("pyclassinformer.dirtree_utils")
 
 def change_dir_of_ctors_dtors(paths, data, dirtree):
     path_prefix = "/classes/"
@@ -48,7 +48,7 @@ def change_dir_of_ctors_dtors(paths, data, dirtree):
                 func_path = "/" + func_name
             
                 # get the func path in the dir tree.
-                dirtree_path = dirtree_utils.get_abs_path_by_inode(dirtree, f.start_ea)
+                dirtree_path = pyclassinformer.dirtree_utils.get_abs_path_by_inode(dirtree, f.start_ea)
             
                 # check if the function is at the top level or not.
                 # and rename it.
@@ -90,7 +90,7 @@ def change_dir_of_vfuncs(paths, data, dirtree):
             func_path = "/" + func_name
             
             # get the func path in the dir tree.
-            dirtree_path = dirtree_utils.get_abs_path_by_inode(dirtree, vfea)
+            dirtree_path = pyclassinformer.dirtree_utils.get_abs_path_by_inode(dirtree, vfea)
             
             # check if the function is at the top level or not.
             # and rename it.
@@ -179,7 +179,7 @@ def get_base_classes(data):
         col = data[vftable_ea]
         
         # get relevant BCDs mainly for multiple inheritance
-        base_classes = pci_utils.utils.get_mdisp_bases(col, data)
+        base_classes = pyclassinformer.pci_utils.utils.get_mdisp_bases(col, data)
         
         # reverse the path because the path is reverse ordered.
         base_classes.reverse()
@@ -191,7 +191,7 @@ def get_base_classes(data):
 
 def method_classifier(data, config=None, icon=-1):
     if config is None:
-        config = pci_config.pci_confg()
+        config = pyclassinformer.pci_config.pci_confg()
         
     # check config values to execute or not
     if not config.exana and not config.mvvm and not config.mvcd and not config.rnvm and not config.rncd:
@@ -220,7 +220,7 @@ def method_classifier(data, config=None, icon=-1):
         
         # display dir tree
         if config.exana:
-            tree = mc_tree.show_mc_tree_t(data, paths, icon=icon)
+            tree = pyclassinformer.mc_tree.show_mc_tree_t(data, paths, icon=icon)
     else:
         print("Warning; Your IDA does not have ida_dirtree or find_entry in dirtree_t. Skip creating dirs for classes and moving functions into them.")
     
