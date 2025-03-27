@@ -77,12 +77,18 @@ def change_dir_of_vfuncs(paths, data, dirtree):
             func_name = ida_funcs.get_func_name(vfea)
             
             # sometimes, a function is not form of a function.
-            # try to fix if or skip it
+            # try to fix it or skip it
             if func_name is None:
                 ida_funcs.add_func(vfea)
                 f = ida_funcs.get_func(vfea)
                 if f is None:
                     print("Warning: a virtual method at {:#x} in {} is not a function and failed to add it as a function. Skipping...".format(vfea, class_name))
+                    continue
+                
+                # get func name again after creating a function
+                func_name = ida_funcs.get_func_name(vfea)
+                if func_name is None:
+                    print("Warning: the func name of the virtual method at {:#x} in {} could not be obtaind. Skipping...".format(vfea, class_name))
                     continue
             #print(hex(vfea), func_name)
                 

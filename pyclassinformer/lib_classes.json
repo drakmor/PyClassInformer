@@ -31,6 +31,7 @@
         "CBasePane",
         "CBaseTabbedPane",
         "CBitmap",
+        "CBrowserControlSite",
         "CBrush",
         "CButton",
         "CByteArray",
@@ -49,7 +50,9 @@
         "CControlSiteFactoryMgr",
         "CCriticalSection",
         "CDC",
+        "CDHtmlControlSink",
         "CDHtmlDialog",
+        "CDHtmlElementEventSink",
         "CDHtmlEventSink",
         "CDWordArray",
         "CDataRecoveryHandler",
@@ -478,6 +481,7 @@
         "_AFX_THREAD_STATE",
         "_AFX_WIN_STATE",
         "_CTypedPtrList<class CPtrList, struct COleControlSiteOrWnd *>",
+        "_CTypedPtrList<class CPtrList,struct COleControlSiteOrWnd *>",
         "type_info"
     ],
     "startswith":[
