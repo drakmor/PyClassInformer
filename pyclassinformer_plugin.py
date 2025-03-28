@@ -6,6 +6,8 @@ import sys
 
 dirpath = os.path.dirname(os.path.abspath(__file__))
 script_dir = os.path.join(dirpath, "pyclassinformer")
+if not os.path.isdir(script_dir):
+    script_dir = os.path.join(dirpath, "..", "pyclassinformer")
 
 ida_idaapi.require("pyclassinformer")
 ida_idaapi.require("pyclassinformer.qtutils")
