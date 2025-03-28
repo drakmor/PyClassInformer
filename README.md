@@ -7,11 +7,12 @@ PyClassInformer is an RTTI parser. Although there are several RTTI parsers such 
 **PyClassInformer can parse RTTI on PE formatted binaries compiled by MSVC++ for x86, x64, ARM and ARM64**. Since it is written in IDAPython, you can run it on IDA for Mac OS and Linux as well as Windows. You can also use results of parsing RTTI in your python code by importing this tool as a library.
 
 ## Usage
-Launch it by pressing Alt+Shift+L. Or navigate to Edit -> Plugins -> PyClassInformer.
+Launch it by pressing Alt+Shift+L. Or navigate to Edit -> Plugins -> PyClassInformer.  
 Then, select the options. In most cases, the default options should remain unchanged.
 
 ## Installation
-Put "pyclassinformer_plugin.py" and "pyclassinformer" folder including the files under it into the "plugins" folder of IDA's user directory ($IDAUSR).
+Put "pyclassinformer_plugin.py" and "pyclassinformer" folder including the files under it into the "plugins" folder of IDA's user directory ($IDAUSR).  
+If you use IDA 8.5 or later and want to manage this plugin with a directory, make a directory like "pci_plugin" in "plugins", copy "ida-plugin.json" into it as well as the files and the folders above.
 
 See the URL if you don't know about "$IDAUSR".  
 [https://hex-rays.com/blog/igors-tip-of-the-week-33-idas-user-directory-idausr/](https://hex-rays.com/blog/igors-tip-of-the-week-33-idas-user-directory-idausr/)  
