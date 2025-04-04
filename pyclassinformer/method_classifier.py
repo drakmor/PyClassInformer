@@ -32,6 +32,8 @@ def change_dir_of_ctors_dtors(paths, data, dirtree):
     # move virtual functions to its class folder
     for vftable_ea in paths:
         path = paths[vftable_ea]
+        if not path:
+            continue
         
         # get the class name that owns the vftable, which is the last entry of the path.
         class_name = path[-1].name
@@ -62,6 +64,8 @@ def change_dir_of_vfuncs(paths, data, dirtree):
     # move virtual functions to its class folder
     for vftable_ea in paths:
         path = paths[vftable_ea]
+        if not path:
+            continue
         
         # get the class name that owns the vftable, which is the last entry of the path.
         class_name = path[-1].name
@@ -136,6 +140,8 @@ def rename_func(ea, prefix="", fn="", is_lib=False):
 def rename_vftable_ref_funcs(paths, data):
     for vftable_ea in paths:
         path = paths[vftable_ea]
+        if not path:
+            continue
         col = data[vftable_ea]
         
         # get the class name that owns the vftable, which is the last entry of the path.
@@ -163,6 +169,8 @@ def rename_funcs(func_eas, prefix="", is_lib=False):
 def rename_vfuncs(paths, data):
     for vftable_ea in paths:
         path = paths[vftable_ea]
+        if not path:
+            continue
         col = data[vftable_ea]
         
         # get the class name that owns the vftable, which is the last entry of the path.

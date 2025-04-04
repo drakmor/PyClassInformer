@@ -98,6 +98,8 @@ class mc_tree_t(ida_kernwin.Choose):
             self.dirtree.mkdir(dirtree_path)
             
             bc_path = self.base_class_paths[vftable_ea]
+            if not bc_path:
+                continue
             actual_class_name = bc_path[-1].name
 
             # for vftable folder
