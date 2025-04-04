@@ -198,7 +198,8 @@ class utils(object):
         col_offs = utils.get_col_offs(col, vftables)
         
         bases = []
-        for path in col.chd.bca.paths[col.offset]:
+        paths = col.chd.bca.paths.get(col.offset, [])
+        for path in paths:
             append = False
             for bcd in path:
                 # for SI and MI but there is only a vftable
