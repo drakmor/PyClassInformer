@@ -112,6 +112,7 @@ The following images are before and after PyClassInformer execution. Many known 
 ## Note
 - I **WILL NOT** support parsing GCC's RTTI. **DO NOT** open an issue about it.
 - I **WILL NOT** support beta versions of IDA. **DO NOT** open an issue about it.
+- I **WILL NOT** support IDA free and IDA demo except for IDA Classroom Free because they do not have IDAPython.
 - Some code is from SusanRTTI and the output table is similar to Class Informer.  
 [https://github.com/nccgroup/SusanRTTI](https://github.com/nccgroup/SusanRTTI)  
 [https://sourceforge.net/projects/classinformer/](https://sourceforge.net/projects/classinformer/)
