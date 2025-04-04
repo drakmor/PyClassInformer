@@ -326,6 +326,10 @@ class RTTIBaseClassArray(RTTIStruc):
         #print({x:[[z.name for z in y] for y in result_paths[x]] for x in result_paths})
         self.paths = result_paths
 
+        for offset in self.paths:
+            if len(self.paths[offset]) == 0:
+                print("Warning: Dispatching class hierarchy paths of the BCA at {:#x} for {} may be wrong because the paths list for the offset {} is empty. The paths will be misclassified as the wrong offset.".format(ea, self.bases[0].name, offset))
+
 
 class RTTICompleteObjectLocator(RTTIStruc):
 
@@ -464,15 +468,15 @@ class rtti_parser(object):
         #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases])))
         if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
             [[ida_bytes.create_struct(y.tdea, RTTITypeDescriptor.size, RTTITypeDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([y.chdea for x in result for y in result[x].chd.bca.bases])):
+        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result] + [y.chdea for x in result for y in result[x].chd.bca.bases])):
             [[ida_bytes.create_struct(y.chdea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
         ida_auto.auto_wait()
     
         # for debugging
         if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) != len([result[x].ea for x in result]):
             print("Warning: RTTICompleteObjectLocator found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
-            print("Warning: RTTIClassHierarchyDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result]))))
+        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result] + [y.chdea for x in result for y in result[x].chd.bca.bases])):
+            print("Warning: RTTIClassHierarchyDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result]+[y.chdea for x in result for y in result[x].chd.bca.bases]))))
         if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
             print("Warning: RTTITypeDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases]))))
         if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) != len(set([result[x].chd.bca.ea for x in result])):
