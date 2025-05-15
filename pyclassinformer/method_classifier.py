@@ -193,7 +193,7 @@ def get_base_classes(data):
         col = data[vftable_ea]
         
         # get relevant BCDs mainly for multiple inheritance
-        base_classes = pyclassinformer.pci_utils.utils.get_mdisp_bases(col, data)
+        base_classes = pyclassinformer.pci_utils.utils.get_col_bases(col, data)
         
         # reverse the path because the path is reverse ordered.
         base_classes.reverse()

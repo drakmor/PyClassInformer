@@ -44,7 +44,7 @@ class pci_chooser_t(ida_kernwin.Choose):
     def get_hierarychy(self, data, vftable_ea):
         col = data[vftable_ea]
         # get the actual base classes mainly for multiple inheritance
-        bases = u.get_mdisp_bases(col, data)
+        bases = u.get_col_bases(col, data)
         
         result = "{}: ".format(col.name)
         if len(bases) > 0:

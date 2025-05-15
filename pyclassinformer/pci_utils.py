@@ -125,11 +125,11 @@ class utils(object):
         for xref in idautils.XrefsTo(ea, 0):
             yield xref.frm
 
-    @staticmethod
-    def get_refs_to_by_type_name(name):
+    @classmethod
+    def get_refs_to_by_type_name(cls, name):
         tif = ida_typeinf.tinfo_t()
         if tif.get_named_type(None, name, ida_typeinf.BTF_STRUCT):
-            for xref in utils.get_refs_to(tif.get_tid()):
+            for xref in cls.get_refs_to(tif.get_tid()):
                 yield xref
                 
     def add_ptr_or_rva_member(self, sid, mname, mtype_name, array=False, idx=-1):
@@ -179,23 +179,33 @@ class utils(object):
             offset = get_member_by_name(struc, name).offset // 8
         return offset
     
-    @staticmethod
-    def get_col_offs(col, vftables):
+    @classmethod
+    def get_cols_by_col(cls, col, vftables):
         # get offsets in COLs by finding xrefs for multiple inheritance
-        x = set([xrea for xrea in utils.get_refs_to(col.tdea)])
-        y = set([xrea for xrea in utils.get_refs_to(col.tid)])
+        x = set([xrea for xrea in cls.get_refs_to(col.tdea)])
+        y = set([xrea for xrea in cls.get_refs_to(col.tid)])
         # If the target is a multi inheritance class, TD or CHD has multiple xrefs from multiple COLs.
         # Here, get the COLs
         coleas = (x&y)
-        cols = list(filter(lambda x: x.ea in coleas, vftables.values()))
-        # get the offsets in COLs
-        col_offs = [ida_bytes.get_32bit(x.ea+utils.get_moff_by_name(x.struc, "offset")) for x in cols]
+        cols = sorted(list(filter(lambda x: x.ea in coleas, vftables.values())), key=lambda x: x.ea in coleas)
+        return cols
+
+    @classmethod
+    def get_col_offs_by_cols(cls, cols):
+        col_offs = [ida_bytes.get_32bit(x.ea+cls.get_moff_by_name(x.struc, "offset")) for x in cols]
         return col_offs
 
-    @staticmethod
-    def get_mdisp_bases(col, vftables):
+    @classmethod
+    def get_col_offs(cls, col, vftables):
+        cols = cls.get_cols_by_col(col, vftables)
+        # get the offsets in COLs
+        col_offs = cls.get_col_offs_by_cols(cols)
+        return col_offs
+
+    @classmethod
+    def get_col_bases(cls, col, vftables):
         # for checking if a class has multiple vftables or not
-        col_offs = utils.get_col_offs(col, vftables)
+        col_offs = cls.get_col_offs(col, vftables)
         
         bases = []
         paths = col.chd.bca.paths.get(col.offset, [])
@@ -207,6 +217,8 @@ class utils(object):
                     append = True
                 # for MI and there are multiple vftables
                 elif bcd.mdisp == col.offset:
+                    append = True
+                elif bcd.pdisp >= 0:
                     append = True
                 # if append flag is enabled, append it and subsequent BCDs after it
                 if append and bcd not in bases:
