@@ -232,7 +232,7 @@ def add_struc_by_name_and_def(name, struc_def):
     return tif
 
 
-def build_udm(name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1, vrepr=None):
+def build_udm(tif, name, msize=0, mtype=ida_typeinf.BTF_INT, moffset=-1, vrepr=None):
     # create a struct member
     udm = ida_typeinf.udm_t()
     udm.name = name
@@ -261,7 +261,7 @@ def add_struc(name):
 
 
 def add_struc_member(tif, name, msize=0, mtype=None, moffset=-1, vrepr=None):
-    udm = build_udm(name, msize, mtype, moffset, vrepr)
+    udm = build_udm(tif, name, msize, mtype, moffset, vrepr)
     tif.add_udm(udm, ida_typeinf.ETF_MAY_DESTROY|ida_typeinf.ETF_FORCENAME)
     return udm
 
