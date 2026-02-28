@@ -1198,12 +1198,7 @@ def build_class_layout_plan(owner_name, layouts, entry_size_estimates, recovered
     return layout_plan
 
 
-def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates, recovered_fields=None, virtual_hints=None):
-    if recovered_fields is None:
-        recovered_fields = {}
-    if virtual_hints is None:
-        virtual_hints = {}
-
+def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates, recovered_fields, virtual_hints):
     for class_name in class_type_names:
         type_name = class_type_names[class_name]
         sid = ensure_generated_struct(type_name)
@@ -1267,7 +1262,9 @@ def refresh_decompiler_views(func_eas, cfunc_cache=None):
 
 def improve_decompilation(paths, data, config):
     class_type_names, layouts, vtables, entry_size_estimates = build_decompilation_context(paths, data)
-    generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates)
+    recovered_fields = collect_constructor_field_writes(layouts, vtables)
+    virtual_hints = collect_virtual_inheritance_hints(paths)
+    generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates, recovered_fields, virtual_hints)
 
     typed_virtuals = set()
     typed_refs = set()
