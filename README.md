@@ -10,6 +10,12 @@ PyClassInformer is an RTTI parser. Although there are several RTTI parsers such 
 Launch it by pressing Alt+Shift+L. Or navigate to Edit -> Plugins -> PyClassInformer.  
 Then, select the options. In most cases, the default options should remain unchanged.
 
+The decompilation pass now has three modes:
+
+- `safe`: helper types, conservative signatures and comments only
+- `balanced`: adds recovered class fields and `this` local typing
+- `aggressive`: adds the full decompilation pass, including constructor-result local typing
+
 ## Installation
 Put "pyclassinformer_plugin.py" and "pyclassinformer" folder including the files under it into the "plugins" folder of IDA's user directory ($IDAUSR).  
 If you use IDA 8.5 or later and want to manage this plugin with a directory, make a directory like "pci_plugin" in "plugins", copy "ida-plugin.json" into it as well as the files and the folders above.
@@ -33,6 +39,7 @@ You will need at least IDA Pro 7.4 or later because of the APIs that I use. If y
 - Rename virtual methods by appending class names to them
 - Add the FUNC_LIB flag to methods that known classes own
 - Rename possible constructors and destructors
+- Generate helper class/vtable types for decompilation, with optional `safe` / `balanced` / `aggressive` modes
 - Coloring known class names and their methods on the list and the tree widgets (IDA 8.3 or later)
 
 ## Features in detail
