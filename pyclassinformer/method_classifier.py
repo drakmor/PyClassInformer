@@ -1,3 +1,4 @@
+import idc
 import ida_idaapi
 import ida_funcs
 import ida_name
@@ -26,6 +27,37 @@ if tree_categorize:
     ida_idaapi.require("pyclassinformer.mc_tree")
     ida_idaapi.require("pyclassinformer.dirtree_utils")
 
+AUTO_RENAME_PREFIXES = ("sub_", "unknown_", "nullsub_", "j_", "thunk_")
+CTOR_DTOR_REF_MNEMS = set(["mov", "lea", "adr", "adrp", "add", "str", "stp"])
+
+
+def is_probable_ctor_dtor_ref(f, refea, byte_window=0x80):
+    if f is None or refea < f.start_ea or refea >= f.end_ea:
+        return False
+    if refea - f.start_ea > byte_window:
+        return False
+    mnem = idc.print_insn_mnem(refea)
+    if not mnem:
+        return False
+    return mnem.lower() in CTOR_DTOR_REF_MNEMS
+
+
+def get_vftable_ref_funcs(vftable_ea):
+    ref_funcs = {}
+    for refea in idautils.DataRefsTo(vftable_ea):
+        f = ida_funcs.get_func(refea)
+        if not f:
+            continue
+        likely = is_probable_ctor_dtor_ref(f, refea)
+        cached = ref_funcs.get(f.start_ea)
+        if cached is None or (likely and not cached[1]):
+            ref_funcs[f.start_ea] = (f, likely)
+
+    likely_funcs = [x[0] for x in ref_funcs.values() if x[1]]
+    if likely_funcs:
+        return likely_funcs
+    return [x[0] for x in ref_funcs.values()]
+
 def change_dir_of_ctors_dtors(paths, data, dirtree):
     path_prefix = "/classes/"
     
@@ -38,25 +70,25 @@ def change_dir_of_ctors_dtors(paths, data, dirtree):
         # get the class name that owns the vftable, which is the last entry of the path.
         class_name = path[-1].name
         
-        for refea in idautils.DataRefsTo(vftable_ea):
-            f = ida_funcs.get_func(refea)
-            if f:
-                func_name = ida_funcs.get_func_name(f.start_ea)
-                # make a directory with a class name
-                dst_path = path_prefix + class_name + "/possible ctors or dtors/"
-                dirtree.mkdir(dst_path)
-                
-                # if the vfunc is at the top level, move it into the vftables folder.
-                func_path = "/" + func_name
+        for f in get_vftable_ref_funcs(vftable_ea):
+            func_name = ida_funcs.get_func_name(f.start_ea)
+            if not func_name:
+                continue
+            # make a directory with a class name
+            dst_path = path_prefix + class_name + "/possible ctors or dtors/"
+            dirtree.mkdir(dst_path)
             
-                # get the func path in the dir tree.
-                dirtree_path = pyclassinformer.dirtree_utils.get_abs_path_by_inode(dirtree, f.start_ea)
-            
-                # check if the function is at the top level or not.
-                # and rename it.
-                if func_path == dirtree_path:
-                    #print(func_path)
-                    dirtree.rename(func_path, dst_path)
+            # if the vfunc is at the top level, move it into the vftables folder.
+            func_path = "/" + func_name
+        
+            # get the func path in the dir tree.
+            dirtree_path = pyclassinformer.dirtree_utils.get_abs_path_by_inode(dirtree, f.start_ea)
+        
+            # check if the function is at the top level or not.
+            # and rename it.
+            if func_path == dirtree_path:
+                #print(func_path)
+                dirtree.rename(func_path, dst_path)
         
 def change_dir_of_vfuncs(paths, data, dirtree):
     path_prefix = "/classes/"
@@ -122,7 +154,7 @@ def rename_func(ea, prefix="", fn="", is_lib=False):
         return False
     
     # rename the function name if it is a dummy name
-    if func_name.startswith("sub_") or func_name.startswith("unknown_"):
+    if func_name.startswith(AUTO_RENAME_PREFIXES):
         # change the function name to the specific name
         if fn:
             func_name = fn
@@ -154,11 +186,8 @@ def rename_vftable_ref_funcs(paths, data):
         
         # get the func eas that refer to vftables and rename them
         #print(hex(vftable_ea))
-        for refea in idautils.DataRefsTo(vftable_ea):
-            #print(hex(refea))
-            f = ida_funcs.get_func(refea)
-            if f:
-                rename_func(f.start_ea, class_name.split("<")[0] + "::", "possible_ctor_or_dtor", is_lib=is_lib)
+        for f in get_vftable_ref_funcs(vftable_ea):
+            rename_func(f.start_ea, class_name.split("<")[0] + "::", "possible_ctor_or_dtor", is_lib=is_lib)
 
 
 def rename_funcs(func_eas, prefix="", is_lib=False):
@@ -205,7 +234,7 @@ def get_base_classes(data):
 
 def method_classifier(data, config=None, icon=-1):
     if config is None:
-        config = pyclassinformer.pci_config.pci_confg()
+        config = pyclassinformer.pci_config.pci_config()
         
     # check config values to execute or not
     if not config.exana and not config.mvvm and not config.mvcd and not config.rnvm and not config.rncd:
