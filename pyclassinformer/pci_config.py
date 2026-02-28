@@ -12,9 +12,10 @@ class pci_config(object):
     mvcd = True
     rnvm = True
     rncd = True
+    decomp = True
     dirtree = True
     
-    def __init__(self, alldata=False, rtti=True, exana=True, mvvm=True, mvcd=True, rnvm=True, rncd=True):
+    def __init__(self, alldata=False, rtti=True, exana=True, mvvm=True, mvcd=True, rnvm=True, rncd=True, decomp=True):
         self.alldata = alldata
         self.rtti = rtti
         self.exana = exana
@@ -22,6 +23,7 @@ class pci_config(object):
         self.mvcd = mvcd
         self.rnvm = rnvm
         self.rncd = rncd
+        self.decomp = decomp
         self.check_dirtree()
         
     def check_dirtree(self):

@@ -21,11 +21,12 @@ class pci_form_t(ida_kernwin.Form):
 <##Create folders for classes and move virtual methods to them in Functions and Names subviews (IDA 7.7 or later):{mvvm}>
 <##Move functions refer vftables to "possible ctors or dtors" folder under each class folder in Functions and Names subviews (IDA 7.7 or later):{mvcd}>
 <##Rename virtual methods:{rnvm}>
-<##Rename possible constructors and destructors:{rncd}>{acts}>
+<##Rename possible constructors and destructors:{rncd}>
+<##Improve decompilation by generating helper types, signatures and comments:{decomp}>{acts}>
 """, {
             'FormChangeCb': F.FormChangeCb(self.OnFormChange),
             'search_area': F.RadGroupControl(("rdata", "alldata")),
-            'acts': F.ChkGroupControl(("rtti", "exana", "mvvm", "mvcd", "rnvm", "rncd")),
+            'acts': F.ChkGroupControl(("rtti", "exana", "mvvm", "mvcd", "rnvm", "rncd", "decomp")),
         })
         
         self.dirtree = dirtree
@@ -62,6 +63,7 @@ class pci_form_t(ida_kernwin.Form):
         self.mvcd.checked = True
         self.rnvm.checked = True
         self.rncd.checked = True
+        self.decomp.checked = True
         
     @staticmethod
     def show():
@@ -73,7 +75,7 @@ class pci_form_t(ida_kernwin.Form):
         # Execute the form
         ok = f.Execute()
         if ok == 1:
-            pcic = pyclassinformer.pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked)
+            pcic = pyclassinformer.pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked, decomp=f.decomp.checked)
         else:
             return None
 
