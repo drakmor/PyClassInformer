@@ -209,8 +209,24 @@ class utils(object):
 
         if ida_9_or_later:
             tif = ida_typeinf.tinfo_t()
-            tif.get_named_type(None, sname)
-            tif.set_udm_type(idx, mtif)
+            if not tif.get_named_type(None, sname):
+                return
+            try:
+                tif.set_udm_type(int(idx), mtif, 0)
+                return
+            except TypeError:
+                pass
+            try:
+                tif.set_udm_type(int(idx), mtif)
+                return
+            except TypeError:
+                pass
+            try:
+                tif.set_udm_type(int(idx), mtif, 0, ida_typeinf.value_repr_t())
+            except TypeError:
+                # IDA 9.x Python bindings differ across builds. If all overloads fail,
+                # keep the member as a plain pointer instead of aborting the plugin.
+                return
         else:
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
