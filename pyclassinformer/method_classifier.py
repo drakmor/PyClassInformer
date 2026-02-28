@@ -521,11 +521,12 @@ def rename_func(ea, prefix="", fn="", is_lib=False):
         return False
     
     # rename the function name if it is a dummy name
-    if func_name.startswith(AUTO_RENAME_PREFIXES):
+    if is_auto_named(func_name):
+        leaf_name = func_name.split("::")[-1]
         # change the function name to the specific name
         if fn:
-            func_name = fn
-        ida_name.set_name(ea, prefix + func_name, ida_name.SN_NOCHECK|ida_name.SN_FORCE)
+            leaf_name = fn
+        ida_name.set_name(ea, prefix + leaf_name, ida_name.SN_NOCHECK|ida_name.SN_FORCE)
         
     # add FUNC_LIB to make ida recognize the function as a part of static linked libraries
     if is_lib:
@@ -602,10 +603,6 @@ def get_base_classes(data):
 def method_classifier(data, config=None, icon=-1):
     if config is None:
         config = pyclassinformer.pci_config.pci_config()
-        
-    # check config values to execute or not
-    if not config.exana and not config.mvvm and not config.mvcd and not config.rnvm and not config.rncd:
-        return None
     
     # get base classes
     paths = get_base_classes(data)
@@ -617,7 +614,10 @@ def method_classifier(data, config=None, icon=-1):
     # rename functions that refer to vftables because they are constructors or destructors
     if config.rncd:
        rename_vftable_ref_funcs(paths, data)
-        
+
+    # generate helper types, annotate vfptr writes and apply conservative signatures
+    improve_decompilation(paths, data, config)
+         
     tree = None
     if tree_categorize:
         # get dirtree and move vfuncs to their class directories
