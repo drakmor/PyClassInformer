@@ -23,10 +23,12 @@ class pci_form_t(ida_kernwin.Form):
 <##Rename virtual methods:{rnvm}>
 <##Rename possible constructors and destructors:{rncd}>
 <##Improve decompilation by generating helper types, signatures and comments:{decomp}>{acts}>
+<##Decompilation mode##Safe:{decomp_safe}> <Balanced:{decomp_balanced}> <Aggressive:{decomp_aggressive}>{decomp_mode}>
 """, {
             'FormChangeCb': F.FormChangeCb(self.OnFormChange),
             'search_area': F.RadGroupControl(("rdata", "alldata")),
             'acts': F.ChkGroupControl(("rtti", "exana", "mvvm", "mvcd", "rnvm", "rncd", "decomp")),
+            'decomp_mode': F.RadGroupControl(("decomp_safe", "decomp_balanced", "decomp_aggressive")),
         })
         
         self.dirtree = dirtree
@@ -55,7 +57,7 @@ class pci_form_t(ida_kernwin.Form):
             self.SetControlValue(self.mvvm, False)
             self.SetControlValue(self.mvcd, False)
 
-    def set_default_settings(self):
+    def set_default_settings(self, decomp_mode="balanced"):
         self.rdata.selected = True
         self.rtti.checked = True
         self.exana.checked = True
@@ -64,6 +66,12 @@ class pci_form_t(ida_kernwin.Form):
         self.rnvm.checked = True
         self.rncd.checked = True
         self.decomp.checked = True
+        if decomp_mode == "safe":
+            self.decomp_safe.selected = True
+        elif decomp_mode == "aggressive":
+            self.decomp_aggressive.selected = True
+        else:
+            self.decomp_balanced.selected = True
         
     @staticmethod
     def show():
@@ -71,11 +79,17 @@ class pci_form_t(ida_kernwin.Form):
         ida_idaapi.require("pyclassinformer.pci_config")
         pcic = pyclassinformer.pci_config.pci_config()
         f = pci_form_t(dirtree=pcic.dirtree)
+        f.set_default_settings(getattr(pcic, "decomp_mode", "balanced"))
 
         # Execute the form
         ok = f.Execute()
         if ok == 1:
-            pcic = pyclassinformer.pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked, decomp=f.decomp.checked)
+            decomp_mode = "balanced"
+            if f.decomp_safe.selected:
+                decomp_mode = "safe"
+            elif f.decomp_aggressive.selected:
+                decomp_mode = "aggressive"
+            pcic = pyclassinformer.pci_config.pci_config(alldata=f.alldata.selected, rtti=f.rtti.checked, exana=f.exana.checked, mvvm=f.mvvm.checked, mvcd=f.mvcd.checked, rnvm=f.rnvm.checked, rncd=f.rncd.checked, decomp=f.decomp.checked, decomp_mode=decomp_mode)
         else:
             return None
 
