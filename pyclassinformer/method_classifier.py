@@ -2098,7 +2098,7 @@ def merge_recovered_field_maps(base_fields, new_fields, prefer_new=False):
     return merged
 
 
-def collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache):
+def collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache, ref_func_cache=None):
     if ida_hexrays is None or not initialize_hexrays():
         return {}
 
@@ -2111,7 +2111,11 @@ def collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache):
     ctor_map = {}
     for entry in vtables:
         owner_name = entry["owner_name"]
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             if get_ctor_dtor_kind(f.start_ea, cfunc_cache) == "possible_constructor":
                 ctor_map.setdefault(owner_name, set()).add(f.start_ea)
 
@@ -2311,7 +2315,7 @@ def pick_best_counted_target(counts):
     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
 
-def collect_virtual_inheritance_hints(paths, vtables=None, cfunc_cache=None):
+def collect_virtual_inheritance_hints(paths, vtables=None, cfunc_cache=None, ref_func_cache=None):
     hints = {}
     for path in paths.values():
         if not path:
@@ -2359,7 +2363,11 @@ def collect_virtual_inheritance_hints(paths, vtables=None, cfunc_cache=None):
         owner_name = entry["owner_name"]
         if owner_name not in hints:
             continue
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             if get_ctor_dtor_kind(f.start_ea, cfunc_cache) == "possible_constructor":
                 ctor_map.setdefault(owner_name, set()).add(f.start_ea)
 
@@ -2384,7 +2392,7 @@ def collect_virtual_inheritance_hints(paths, vtables=None, cfunc_cache=None):
     return hints
 
 
-def collect_constructor_field_writes(layouts, vtables, cfunc_cache=None):
+def collect_constructor_field_writes(layouts, vtables, cfunc_cache=None, ref_func_cache=None):
     vtable_eas = set(entry["vftable_ea"] for entry in vtables)
     owner_vfptr_offsets = {}
     for owner_name in layouts:
@@ -2394,7 +2402,11 @@ def collect_constructor_field_writes(layouts, vtables, cfunc_cache=None):
     ctor_map = {}
     for entry in vtables:
         owner_name = entry["owner_name"]
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             if get_ctor_dtor_kind(f.start_ea, cfunc_cache) == "possible_constructor":
                 ctor_map.setdefault(owner_name, set()).add(f.start_ea)
 
@@ -2818,20 +2830,26 @@ def improve_decompilation(paths, data, config):
     decomp_mode = get_decomp_mode(config)
     class_type_names, layouts, vtables, entry_size_estimates = build_decompilation_context(paths, data)
     cfunc_cache = {}
+    ref_func_cache = {}
     recovered_fields = {}
     virtual_hints = {}
     if decomp_mode in ("balanced", "aggressive"):
-        instr_fields = collect_constructor_field_writes(layouts, vtables, cfunc_cache)
-        ctree_fields = collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache)
+        instr_fields = collect_constructor_field_writes(layouts, vtables, cfunc_cache, ref_func_cache)
+        ctree_fields = collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache, ref_func_cache)
         instr_fields = filter_instruction_recovered_fields(instr_fields, ctree_fields, layouts, entry_size_estimates)
         recovered_fields = merge_recovered_field_maps(instr_fields, ctree_fields, prefer_new=True)
-        virtual_hints = collect_virtual_inheritance_hints(paths, vtables, cfunc_cache)
+        virtual_hints = collect_virtual_inheritance_hints(paths, vtables, cfunc_cache, ref_func_cache)
     generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates, recovered_fields, virtual_hints, cfunc_cache)
     cfunc_cache.clear()
+    ref_func_cache.clear()
 
     preferred_ref_entries = {}
     for entry in sorted(vtables, key=lambda item: (item["offset"], item["owner_name"], item["subobject_name"])):
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             current = preferred_ref_entries.get(f.start_ea)
             if current is None or entry["offset"] < current["offset"]:
                 preferred_ref_entries[f.start_ea] = entry
@@ -2860,7 +2878,11 @@ def improve_decompilation(paths, data, config):
                 thisarg_types[func_ea] = entry["subobject_type_name"]
                 refreshed_funcs.add(func_ea)
 
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             preferred_entry = preferred_ref_entries.get(f.start_ea)
             if preferred_entry is not None and preferred_entry is not entry:
                 continue
@@ -2892,7 +2914,11 @@ def improve_decompilation(paths, data, config):
 
         vfptr_member_name = get_vfptr_member_name(entry["offset"])
         vfptr_store_refs = set()
-        for f in get_vftable_ref_funcs(entry["vftable_ea"], expected_offset=entry["offset"], cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                entry["vftable_ea"],
+                expected_offset=entry["offset"],
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             for match in function_writes_vtable_to_this(
                     f.start_ea,
                     entry["vftable_ea"],
@@ -2933,7 +2959,14 @@ def is_probable_ctor_dtor_ref(f, refea, byte_window=0x80):
     return mnem.lower() in CTOR_DTOR_REF_MNEMS
 
 
-def get_vftable_ref_funcs(vftable_ea, expected_offset=None, cfunc_cache=None):
+def get_vftable_ref_funcs(vftable_ea, expected_offset=None, cfunc_cache=None, ref_func_cache=None):
+    cache_key = None
+    if ref_func_cache is not None:
+        cache_key = (int(vftable_ea), None if expected_offset is None else int(expected_offset))
+        cached = ref_func_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
     ref_funcs = {}
     for refea in idautils.DataRefsTo(vftable_ea):
         f = ida_funcs.get_func(refea)
@@ -2957,16 +2990,24 @@ def get_vftable_ref_funcs(vftable_ea, expected_offset=None, cfunc_cache=None):
         if exact_funcs:
             exact_set = set(f.start_ea for f in exact_funcs)
             likely_funcs = [x[0] for x in ref_funcs.values() if x[1] and x[0].start_ea not in exact_set]
-            return exact_funcs + likely_funcs
+            result = exact_funcs + likely_funcs
+            if cache_key is not None:
+                ref_func_cache[cache_key] = tuple(result)
+            return result
 
     likely_funcs = [x[0] for x in ref_funcs.values() if x[1]]
     if likely_funcs:
-        return likely_funcs
-    return [x[0] for x in ref_funcs.values()]
+        result = likely_funcs
+    else:
+        result = [x[0] for x in ref_funcs.values()]
+    if cache_key is not None:
+        ref_func_cache[cache_key] = tuple(result)
+    return result
 
 def change_dir_of_ctors_dtors(paths, data, dirtree):
     path_prefix = "/classes/"
     cfunc_cache = {}
+    ref_func_cache = {}
     
     # move virtual functions to its class folder
     for vftable_ea in paths:
@@ -2977,7 +3018,11 @@ def change_dir_of_ctors_dtors(paths, data, dirtree):
         # get the class name that owns the vftable, which is the last entry of the path.
         class_name = path[-1].name
         
-        for f in get_vftable_ref_funcs(vftable_ea, expected_offset=data[vftable_ea].offset, cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                vftable_ea,
+                expected_offset=data[vftable_ea].offset,
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             func_name = ida_funcs.get_func_name(f.start_ea)
             if not func_name:
                 continue
@@ -3079,6 +3124,7 @@ def rename_func(ea, prefix="", fn="", is_lib=False):
 
 def rename_vftable_ref_funcs(paths, data):
     cfunc_cache = {}
+    ref_func_cache = {}
     for vftable_ea in paths:
         path = paths[vftable_ea]
         if not path:
@@ -3095,7 +3141,11 @@ def rename_vftable_ref_funcs(paths, data):
         
         # get the func eas that refer to vftables and rename them
         #print(hex(vftable_ea))
-        for f in get_vftable_ref_funcs(vftable_ea, expected_offset=data[vftable_ea].offset, cfunc_cache=cfunc_cache):
+        for f in get_vftable_ref_funcs(
+                vftable_ea,
+                expected_offset=data[vftable_ea].offset,
+                cfunc_cache=cfunc_cache,
+                ref_func_cache=ref_func_cache):
             rename_func(f.start_ea, class_name.split("<")[0] + "::", get_ctor_dtor_kind(f.start_ea, cfunc_cache), is_lib=is_lib)
 
 
