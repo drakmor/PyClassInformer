@@ -43,7 +43,8 @@ except Exception:
 hexrays_initialized = False
 
 AUTO_RENAME_PREFIXES = ("sub_", "unknown_", "nullsub_", "j_", "thunk_")
-AUTO_GENERATED_NAMES = ("virtual_method_", "possible_ctor_or_dtor", "possible_constructor", "possible_destructor", "destructor", "scalar_deleting_destructor", "vector_deleting_destructor")
+AUTO_GENERATED_PREFIXES = ("virtual_method_",)
+AUTO_GENERATED_NAMES = ("possible_ctor_or_dtor", "possible_constructor", "possible_destructor", "destructor", "scalar_deleting_destructor", "vector_deleting_destructor")
 CTOR_DTOR_REF_MNEMS = set(["mov", "lea", "adr", "adrp", "add", "str", "stp"])
 THUNK_BRANCH_MNEMS = set(["jmp", "b", "bra"])
 CALL_MNEMS = set(["call", "bl", "blx", "blr"])
@@ -62,7 +63,9 @@ def is_auto_named(func_name):
     if not func_name:
         return False
     leaf = func_name.split("::")[-1]
-    return leaf.startswith(AUTO_RENAME_PREFIXES + AUTO_GENERATED_NAMES)
+    if leaf in AUTO_GENERATED_NAMES:
+        return True
+    return leaf.startswith(AUTO_RENAME_PREFIXES + AUTO_GENERATED_PREFIXES)
 
 
 def normalize_identifier(text, fallback="item", max_len=64):
@@ -224,12 +227,7 @@ def get_function_tinfo(func_ea):
 
 def build_function_ptr_tinfo(func_ea, fallback_decl):
     func_tif = get_function_tinfo(func_ea)
-    current_name = ida_funcs.get_func_name(func_ea) or ""
-    current_type = idc.get_type(func_ea)
-    prefer_existing = True
-    if current_type:
-        prefer_existing = not is_generic_auto_type(current_name, current_type)
-    if func_tif is not None and prefer_existing:
+    if func_tif is not None:
         ptr_tif = ida_typeinf.tinfo_t()
         try:
             ptr_tif.create_ptr(func_tif)
@@ -950,6 +948,7 @@ def get_virtual_method_kind(func_ea, slot_index, cfunc_cache=None):
     name = ida_funcs.get_func_name(func_ea) or ida_name.get_name(func_ea) or ""
     demangled = ida_name.demangle_name(name, 0) or name
     lname = demangled.lower()
+    leaf_name = name.split("::")[-1]
     thunk_target = get_thunk_target(func_ea, cfunc_cache)
     analysis_ea = thunk_target if thunk_target != ida_idaapi.BADADDR else func_ea
 
@@ -957,7 +956,7 @@ def get_virtual_method_kind(func_ea, slot_index, cfunc_cache=None):
         return "scalar_deleting_destructor", thunk_target
     if name.startswith("??_E") or "vector deleting destructor" in lname or "vector_deleting_destructor" in lname:
         return "vector_deleting_destructor", thunk_target
-    if name.startswith("??1"):
+    if name.startswith("??1") or leaf_name == "destructor":
         return "destructor", thunk_target
     if ("`destructor'" in lname or " destructor" in lname) and not is_auto_named(name):
         return "destructor", thunk_target
@@ -2922,7 +2921,9 @@ def get_vftable_ref_funcs(vftable_ea, expected_offset=None, cfunc_cache=None):
             if matches:
                 exact_funcs.append(f)
         if exact_funcs:
-            return exact_funcs
+            exact_set = set(f.start_ea for f in exact_funcs)
+            likely_funcs = [x[0] for x in ref_funcs.values() if x[1] and x[0].start_ea not in exact_set]
+            return exact_funcs + likely_funcs
 
     likely_funcs = [x[0] for x in ref_funcs.values() if x[1]]
     if likely_funcs:
