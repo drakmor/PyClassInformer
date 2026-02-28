@@ -159,7 +159,40 @@ class utils(object):
             
         idc.add_struc_member(sid, mname, ida_idaapi.BADADDR, ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, -1, 4)
         self.set_ptr_or_rva_member(sid, mname, mtype_name, array, idx)
-        
+
+    @staticmethod
+    def _replace_named_udm_type(sid, idx, mtif, vrepr=None):
+        if not ida_9_or_later:
+            return False
+        if mtif is None:
+            return False
+
+        sname = idc.get_struc_name(sid)
+        if not sname:
+            return False
+
+        tif = ida_typeinf.tinfo_t()
+        if not tif.get_named_type(None, sname):
+            return False
+
+        udt = ida_typeinf.udt_type_data_t()
+        if not tif.get_udt_details(udt):
+            return False
+
+        idx = int(idx)
+        if idx < 0 or idx >= udt.size():
+            return False
+
+        udm = ida_typeinf.udm_t(udt[idx])
+        udm.type = mtif
+        if vrepr is not None:
+            udm.set_value_repr(vrepr)
+        udt[idx] = udm
+
+        if not tif.create_udt(udt):
+            return False
+        return tif.set_named_type(None, sname, ida_typeinf.NTF_REPLACE) == ida_typeinf.TERR_OK
+         
     def set_ptr_or_rva_member(self, sid, mname, mtype_name, array=False, idx=-1):
         sname = idc.get_struc_name(sid)
         
@@ -178,11 +211,7 @@ class utils(object):
             mtif = get_ptr_type(mtype_name, ptr_size=0, array=array)
             
         if ida_9_or_later:
-            tif = ida_typeinf.tinfo_t()
-            tif.get_named_type(None, sname)
-            udt = ida_typeinf.udt_type_data_t()
-            tif.set_udm_type(idx, mtif, 0, r)
-            tif.get_udt_details(udt)
+            self._replace_named_udm_type(sid, idx, mtif, r)
         else:
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
@@ -208,25 +237,7 @@ class utils(object):
             return
 
         if ida_9_or_later:
-            tif = ida_typeinf.tinfo_t()
-            if not tif.get_named_type(None, sname):
-                return
-            try:
-                tif.set_udm_type(int(idx), mtif, 0)
-                return
-            except TypeError:
-                pass
-            try:
-                tif.set_udm_type(int(idx), mtif)
-                return
-            except TypeError:
-                pass
-            try:
-                tif.set_udm_type(int(idx), mtif, 0, ida_typeinf.value_repr_t())
-            except TypeError:
-                # IDA 9.x Python bindings differ across builds. If all overloads fail,
-                # keep the member as a plain pointer instead of aborting the plugin.
-                return
+            self._replace_named_udm_type(sid, idx, mtif)
         else:
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
