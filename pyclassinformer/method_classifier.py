@@ -37,6 +37,7 @@ CTOR_DTOR_REF_MNEMS = set(["mov", "lea", "adr", "adrp", "add", "str", "stp"])
 THUNK_BRANCH_MNEMS = set(["jmp", "b", "bra"])
 CALL_MNEMS = set(["call", "bl", "blx", "blr"])
 DELETE_CALLEE_HINTS = ("??3", "operator delete", "__imp_??3", " free", "_free", "j_j_free", " delete")
+ALLOC_CALLEE_HINTS = ("??2", "operator new", "malloc", "calloc", "realloc", "HeapAlloc")
 TYPE_PREFIX = "pci__"
 COMMENT_TAG = "PyClassInformer"
 
@@ -76,19 +77,38 @@ def build_generated_type_name(kind, class_name, offset=None):
     return "%s%s_%08x" % (TYPE_PREFIX, safe, digest)
 
 
-def create_or_replace_generated_struct(type_name):
+def ensure_generated_struct(type_name):
     sid = idc.get_struc_id(type_name)
-    if sid != ida_idaapi.BADADDR:
-        idc.del_struc(sid)
-    sid = idc.add_struc(0xFFFFFFFF, type_name, False)
+    if sid == ida_idaapi.BADADDR:
+        sid = idc.add_struc(0xFFFFFFFF, type_name, False)
     return sid
 
 
 def add_generated_ptr_member(sid, member_name, offset, target_type_name=None):
+    try:
+        existing_off = idc.get_member_offset(sid, member_name)
+    except Exception:
+        existing_off = ida_idaapi.BADADDR
+
+    if existing_off != ida_idaapi.BADADDR:
+        if target_type_name:
+            u.set_ptr_member(sid, member_name, target_type_name)
+        return 0
+
     r = idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | u.PTR_TYPE, -1, u.PTR_SIZE)
     if r == 0 and target_type_name:
         u.set_ptr_member(sid, member_name, target_type_name)
     return r
+
+
+def ensure_generated_member(sid, member_name, offset):
+    try:
+        existing_off = idc.get_member_offset(sid, member_name)
+    except Exception:
+        existing_off = ida_idaapi.BADADDR
+    if existing_off != ida_idaapi.BADADDR:
+        return 0
+    return idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | u.PTR_TYPE, -1, u.PTR_SIZE)
 
 
 def append_comment(ea, text, repeatable=1):
@@ -98,6 +118,36 @@ def append_comment(ea, text, repeatable=1):
     if current:
         text = current + " | " + text
     idc.set_cmt(ea, text, repeatable)
+
+
+def get_code_ref_targets(ea):
+    return [x for x in idautils.CodeRefsFrom(ea, 0) if x != ida_idaapi.BADADDR]
+
+
+def get_prev_code_items(ea, max_count=6):
+    items = []
+    cur = ea
+    for _ in range(max_count):
+        cur = idc.prev_head(cur, 0)
+        if cur == ida_idaapi.BADADDR:
+            break
+        items.append(cur)
+    return items
+
+
+def is_operator_new_like_target(target):
+    name = ida_name.get_short_name(target) or ida_name.get_name(target) or ""
+    demangled = ida_name.demangle_name(name, 0) or name
+    lname = demangled.lower()
+    return any(token.lower() in lname for token in ALLOC_CALLEE_HINTS)
+
+
+def format_signed_offset(value):
+    if value == 0:
+        return "+0x0"
+    if value < 0:
+        return "-0x%x" % (-value)
+    return "+0x%x" % value
 
 
 def set_member_comment(sid, member_name, text):
@@ -152,6 +202,41 @@ def get_thunk_target(func_ea):
     return ida_idaapi.BADADDR
 
 
+def get_thunk_adjustment(func_ea):
+    f = ida_funcs.get_func(func_ea)
+    if not f:
+        return 0
+
+    for item in get_function_items(f.start_ea, max_items=3):
+        mnem = (idc.print_insn_mnem(item) or "").lower()
+        op0 = (idc.print_operand(item, 0) or "").lower()
+        op1 = idc.print_operand(item, 1) or ""
+        if mnem in ("add", "sub") and op0 in ("ecx", "rcx", "r0", "x0"):
+            try:
+                value = idc.get_operand_value(item, 1)
+            except Exception:
+                value = None
+            if value is None:
+                continue
+            if mnem == "sub":
+                value = -value
+            return value
+        if mnem == "lea" and op0 in ("ecx", "rcx"):
+            if "+" in op1:
+                try:
+                    imm = idc.get_operand_value(item, 1)
+                    return imm
+                except Exception:
+                    pass
+            if "-" in op1:
+                try:
+                    imm = idc.get_operand_value(item, 1)
+                    return -imm
+                except Exception:
+                    pass
+    return 0
+
+
 def function_calls_delete_like(func_ea, max_items=32):
     f = ida_funcs.get_func(func_ea)
     if not f:
@@ -203,23 +288,33 @@ def get_ctor_dtor_kind(func_ea):
     return "possible_constructor"
 
 
-def get_virtual_stub_name(kind, slot_index, thunk_target):
+def get_virtual_stub_name(kind, slot_index, thunk_target, thunk_adjust=0):
     if kind in ("scalar_deleting_destructor", "vector_deleting_destructor", "destructor"):
         return kind
     if kind == "thunk":
         target_name = ida_name.get_short_name(thunk_target) or ida_funcs.get_func_name(thunk_target) or ("slot_%u" % slot_index)
         target_name = target_name.split("::")[-1]
-        return "thunk_%s" % normalize_identifier(target_name, fallback="slot_%u" % slot_index, max_len=40)
+        adj = ""
+        if thunk_adjust:
+            adj = "_adj_%x" % (abs(thunk_adjust) & 0xffffffff)
+            if thunk_adjust < 0:
+                adj = "_sub_%x" % (abs(thunk_adjust) & 0xffffffff)
+        return "thunk%s_%s" % (adj, normalize_identifier(target_name, fallback="slot_%u" % slot_index, max_len=36))
     return ""
 
 
-def get_vtable_member_name(func_ea, slot_index, kind, thunk_target, used_names):
+def get_vtable_member_name(func_ea, slot_index, kind, thunk_target, used_names, thunk_adjust=0):
     if kind in ("scalar_deleting_destructor", "vector_deleting_destructor", "destructor"):
         base = kind
     elif kind == "thunk":
         target_name = ida_name.get_short_name(thunk_target) or ida_funcs.get_func_name(thunk_target) or ("slot_%u" % slot_index)
         target_name = target_name.split("::")[-1]
-        base = "thunk_%s" % normalize_identifier(target_name, fallback="slot_%u" % slot_index, max_len=40)
+        adj = ""
+        if thunk_adjust:
+            adj = "_adj_%x" % (abs(thunk_adjust) & 0xffffffff)
+            if thunk_adjust < 0:
+                adj = "_sub_%x" % (abs(thunk_adjust) & 0xffffffff)
+        base = "thunk%s_%s" % (adj, normalize_identifier(target_name, fallback="slot_%u" % slot_index, max_len=36))
     else:
         func_name = ida_name.get_short_name(func_ea) or ida_funcs.get_func_name(func_ea) or ("slot_%u" % slot_index)
         func_name = func_name.split("::")[-1]
@@ -297,6 +392,44 @@ def apply_vtable_slot_type(slot_ea, class_type_name, kind, slot_index):
         return False
 
 
+def apply_vtable_struct_type(entry):
+    sid = idc.get_struc_id(entry["vtbl_type_name"])
+    if sid == ida_idaapi.BADADDR:
+        return False
+
+    size = len(entry["col"].vfeas) * u.PTR_SIZE
+    if size <= 0:
+        return False
+
+    try:
+        ok = bool(ida_bytes.create_struct(entry["vftable_ea"], size, sid, True))
+    except Exception:
+        ok = False
+    if not ok:
+        try:
+            ok = bool(idc.SetType(entry["vftable_ea"], "struct %s;" % entry["vtbl_type_name"]))
+        except Exception:
+            ok = False
+    if ok:
+        append_comment(entry["vftable_ea"], "%s: typed as %s" % (COMMENT_TAG, entry["vtbl_type_name"]), 1)
+    return ok
+
+
+def annotate_ctor_call_sites(func_ea, owner_name, owner_type_name):
+    for call_ea in idautils.CodeRefsTo(func_ea, 0):
+        append_comment(call_ea, "%s: constructs %s (%s)" % (COMMENT_TAG, owner_name, owner_type_name), 0)
+        for prev_ea in get_prev_code_items(call_ea, max_count=6):
+            mnem = (idc.print_insn_mnem(prev_ea) or "").lower()
+            if mnem not in CALL_MNEMS:
+                continue
+            targets = get_code_ref_targets(prev_ea)
+            if not targets:
+                continue
+            if any(is_operator_new_like_target(target) for target in targets):
+                append_comment(prev_ea, "%s: likely allocates object for %s" % (COMMENT_TAG, owner_name), 0)
+                break
+
+
 def build_decompilation_context(paths, data):
     class_type_names = {}
     layouts = {}
@@ -334,23 +467,31 @@ def build_decompilation_context(paths, data):
 def generate_decompilation_types(class_type_names, layouts, vtables):
     for class_name in class_type_names:
         type_name = class_type_names[class_name]
-        sid = create_or_replace_generated_struct(type_name)
+        sid = ensure_generated_struct(type_name)
         idc.set_struc_cmt(sid, "%s: generated class type for %s" % (COMMENT_TAG, class_name), 1)
 
     for entry in vtables:
-        sid = create_or_replace_generated_struct(entry["vtbl_type_name"])
+        sid = ensure_generated_struct(entry["vtbl_type_name"])
         idc.set_struc_cmt(sid, "%s: generated vtable type for %s (offset %#x)" % (COMMENT_TAG, entry["owner_name"], entry["offset"]), 1)
 
         used_names = set()
         for slot_index, func_ea in enumerate(entry["col"].vfeas):
             kind, thunk_target = get_virtual_method_kind(func_ea, slot_index)
-            member_name = get_vtable_member_name(func_ea, slot_index, kind, thunk_target, used_names)
-            idc.add_struc_member(sid, member_name, ida_idaapi.BADADDR, ida_bytes.FF_DATA | u.PTR_TYPE, -1, u.PTR_SIZE)
+            thunk_adjust = get_thunk_adjustment(func_ea) if kind == "thunk" else 0
+            member_name = get_vtable_member_name(func_ea, slot_index, kind, thunk_target, used_names, thunk_adjust=thunk_adjust)
+            ensure_generated_member(sid, member_name, slot_index * u.PTR_SIZE)
             slot_ea = entry["vftable_ea"] + slot_index * u.PTR_SIZE
             apply_vtable_slot_type(slot_ea, entry["subobject_type_name"], kind, slot_index)
             slot_comment = "%s: vtable slot %u for %s (%s)" % (COMMENT_TAG, slot_index, entry["subobject_name"], kind)
+            if thunk_adjust:
+                slot_comment += ", this %s" % format_signed_offset(thunk_adjust)
             append_comment(slot_ea, slot_comment, 1)
-            set_member_comment(sid, member_name, "slot %u -> %#x (%s)" % (slot_index, func_ea, kind))
+            member_comment = "slot %u -> %#x (%s)" % (slot_index, func_ea, kind)
+            if thunk_adjust:
+                member_comment += ", this %s" % format_signed_offset(thunk_adjust)
+            set_member_comment(sid, member_name, member_comment)
+
+        apply_vtable_struct_type(entry)
 
     for owner_name in layouts:
         sid = idc.get_struc_id(class_type_names[owner_name])
@@ -376,12 +517,15 @@ def improve_decompilation(paths, data, config):
 
         for slot_index, func_ea in enumerate(col.vfeas):
             kind, thunk_target = get_virtual_method_kind(func_ea, slot_index)
+            thunk_adjust = get_thunk_adjustment(func_ea) if kind == "thunk" else 0
             if config.rnvm:
-                stub_name = get_virtual_stub_name(kind, slot_index, thunk_target)
+                stub_name = get_virtual_stub_name(kind, slot_index, thunk_target, thunk_adjust=thunk_adjust)
                 rename_func(func_ea, entry["subobject_name"].split("<")[0] + "::", stub_name, is_lib=is_lib)
             if func_ea not in typed_virtuals:
                 apply_generated_signature(func_ea, entry["subobject_type_name"], kind)
                 append_comment(func_ea, "%s: %s for %s" % (COMMENT_TAG, kind, entry["subobject_name"]), 1)
+                if kind == "thunk" and thunk_target != ida_idaapi.BADADDR:
+                    append_comment(func_ea, "%s: adjusts self %s then jumps to %#x" % (COMMENT_TAG, format_signed_offset(thunk_adjust), thunk_target), 1)
                 typed_virtuals.add(func_ea)
 
         for f in get_vftable_ref_funcs(entry["vftable_ea"]):
@@ -391,6 +535,8 @@ def improve_decompilation(paths, data, config):
             if f.start_ea not in typed_refs:
                 apply_generated_signature(f.start_ea, entry["owner_type_name"], ref_kind)
                 append_comment(f.start_ea, "%s: %s for %s" % (COMMENT_TAG, ref_kind, entry["owner_name"]), 1)
+                if ref_kind == "possible_constructor":
+                    annotate_ctor_call_sites(f.start_ea, entry["owner_name"], entry["owner_type_name"])
                 typed_refs.add(f.start_ea)
 
         vfptr_member_name = get_vfptr_member_name(entry["offset"])
@@ -555,7 +701,7 @@ def rename_vftable_ref_funcs(paths, data):
         # get the func eas that refer to vftables and rename them
         #print(hex(vftable_ea))
         for f in get_vftable_ref_funcs(vftable_ea):
-            rename_func(f.start_ea, class_name.split("<")[0] + "::", "possible_ctor_or_dtor", is_lib=is_lib)
+            rename_func(f.start_ea, class_name.split("<")[0] + "::", get_ctor_dtor_kind(f.start_ea), is_lib=is_lib)
 
 
 def rename_funcs(func_eas, prefix="", is_lib=False):
@@ -603,6 +749,11 @@ def get_base_classes(data):
 def method_classifier(data, config=None, icon=-1):
     if config is None:
         config = pyclassinformer.pci_config.pci_config()
+    decomp_enabled = getattr(config, "decomp", True)
+
+    # check config values to execute or not
+    if not config.exana and not config.mvvm and not config.mvcd and not config.rnvm and not config.rncd and not decomp_enabled:
+        return None
     
     # get base classes
     paths = get_base_classes(data)
@@ -616,7 +767,8 @@ def method_classifier(data, config=None, icon=-1):
        rename_vftable_ref_funcs(paths, data)
 
     # generate helper types, annotate vfptr writes and apply conservative signatures
-    improve_decompilation(paths, data, config)
+    if decomp_enabled:
+        improve_decompilation(paths, data, config)
          
     tree = None
     if tree_categorize:
