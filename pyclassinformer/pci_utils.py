@@ -247,7 +247,16 @@ class utils(object):
             return False
 
         if idx < 0:
-            idx = idc.get_member_qty(sid) - 1
+            idx = -1
+            try:
+                for i, (_, name, _) in enumerate(idautils.StructMembers(sid)):
+                    if name == mname:
+                        idx = i
+                        break
+            except Exception:
+                idx = -1
+            if idx < 0:
+                idx = idc.get_member_qty(sid) - 1
 
         if ida_9_or_later:
             return self._replace_named_udm_type(sid, idx, mtif)
