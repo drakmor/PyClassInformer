@@ -103,6 +103,16 @@ def ensure_generated_struct(type_name):
     return sid
 
 
+def is_invalid_struc_id(sid):
+    if sid is None:
+        return True
+    if sid == ida_idaapi.BADADDR:
+        return True
+    if isinstance(sid, int) and sid < 0:
+        return True
+    return False
+
+
 def is_missing_member_offset(offset):
     if offset is None:
         return True
@@ -1150,7 +1160,9 @@ def apply_vtable_member_type(sid, member_name, class_type_name, kind, slot_index
 
 def apply_vtable_struct_type(entry):
     sid = idc.get_struc_id(entry["vtbl_type_name"])
-    if sid == ida_idaapi.BADADDR:
+    if is_invalid_struc_id(sid):
+        sid = ensure_generated_struct(entry["vtbl_type_name"])
+    if is_invalid_struc_id(sid):
         return False
 
     size = len(entry["col"].vfeas) * u.PTR_SIZE
@@ -2232,8 +2244,10 @@ def populate_standalone_subobject_types(class_type_names, layouts, vtables, entr
                 entry["owner_name"]))[0]
 
         sid = idc.get_struc_id(type_name)
-        if sid == ida_idaapi.BADADDR:
+        if is_invalid_struc_id(sid):
             sid = ensure_generated_struct(type_name)
+        if is_invalid_struc_id(sid):
+            continue
         clear_generated_layout_members(sid)
 
         if add_generated_ptr_member(sid, "vfptr", 0, preferred["vtbl_type_name"]) == 0:
@@ -2611,11 +2625,24 @@ def can_read_vbtable_dword(ea):
     return True
 
 
+def is_plausible_vbtable_value(slot_off, value):
+    # MSVC vbtable entries are small signed offsets relative to the object.
+    # Very large magnitudes are almost always unrelated .rdata words.
+    if value is None:
+        return False
+    if abs(int(value)) > 0x10000:
+        return False
+    if slot_off == 0 and value > 0:
+        return False
+    return True
+
+
 def read_vbtable_values(table_ea, slot_offsets, hint):
     values = {}
     if table_ea in (None, ida_idaapi.BADADDR):
         return values
 
+    explicit_slots = set(slot_offsets)
     max_slot_off = max(slot_offsets) if slot_offsets else 0
     base_count = len(hint.get("bases", []))
     max_slot_off = max(max_slot_off, base_count * 4)
@@ -2625,11 +2652,14 @@ def read_vbtable_values(table_ea, slot_offsets, hint):
         slot_ea = table_ea + slot_off
         if not can_read_vbtable_dword(slot_ea):
             break
-        slot_offsets.add(slot_off)
         try:
-            values[slot_off] = u.to_signed32(ida_bytes.get_32bit(slot_ea))
+            slot_value = u.to_signed32(ida_bytes.get_32bit(slot_ea))
         except Exception:
             break
+        if slot_off not in explicit_slots and not is_plausible_vbtable_value(slot_off, slot_value):
+            continue
+        slot_offsets.add(slot_off)
+        values[slot_off] = slot_value
     return values
 
 
@@ -2742,6 +2772,10 @@ def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_
 
     for owner_name in layouts:
         sid = idc.get_struc_id(class_type_names[owner_name])
+        if is_invalid_struc_id(sid):
+            sid = ensure_generated_struct(class_type_names[owner_name])
+        if is_invalid_struc_id(sid):
+            continue
         clear_generated_layout_members(sid)
         for member in build_class_layout_plan(owner_name, layouts, entry_size_estimates, recovered_fields, virtual_hints):
             r = -1
