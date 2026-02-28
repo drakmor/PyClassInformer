@@ -95,9 +95,19 @@ def build_generated_type_name(kind, class_name, offset=None):
 
 def ensure_generated_struct(type_name):
     sid = idc.get_struc_id(type_name)
-    if sid == ida_idaapi.BADADDR:
+    if sid in (ida_idaapi.BADADDR, -1, None):
         sid = idc.add_struc(0xFFFFFFFF, type_name, False)
     return sid
+
+
+def is_missing_member_offset(offset):
+    if offset is None:
+        return True
+    if offset == ida_idaapi.BADADDR:
+        return True
+    if isinstance(offset, int) and offset < 0:
+        return True
+    return False
 
 
 def add_generated_ptr_member(sid, member_name, offset, target_type_name=None):
@@ -106,7 +116,7 @@ def add_generated_ptr_member(sid, member_name, offset, target_type_name=None):
     except Exception:
         existing_off = ida_idaapi.BADADDR
 
-    if existing_off != ida_idaapi.BADADDR:
+    if not is_missing_member_offset(existing_off):
         if target_type_name:
             u.set_ptr_member(sid, member_name, target_type_name)
         return 0
@@ -122,7 +132,7 @@ def ensure_generated_member(sid, member_name, offset):
         existing_off = idc.get_member_offset(sid, member_name)
     except Exception:
         existing_off = ida_idaapi.BADADDR
-    if existing_off != ida_idaapi.BADADDR:
+    if not is_missing_member_offset(existing_off):
         return 0
     return idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | u.PTR_TYPE, -1, u.PTR_SIZE)
 
@@ -136,7 +146,7 @@ def ensure_generated_byte_member(sid, member_name, offset, size):
     except Exception:
         existing_off = ida_idaapi.BADADDR
 
-    if existing_off != ida_idaapi.BADADDR:
+    if not is_missing_member_offset(existing_off):
         return 0
     return idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | ida_bytes.FF_BYTE, -1, size)
 
@@ -598,7 +608,7 @@ def ensure_generated_sized_member(sid, member_name, offset, size):
         existing_off = idc.get_member_offset(sid, member_name)
     except Exception:
         existing_off = ida_idaapi.BADADDR
-    if existing_off != ida_idaapi.BADADDR:
+    if not is_missing_member_offset(existing_off):
         return 0
 
     flag = ida_bytes.FF_DATA | ida_bytes.FF_BYTE
@@ -799,7 +809,7 @@ def set_member_comment(sid, member_name, text):
         moff = idc.get_member_offset(sid, member_name)
     except Exception:
         return
-    if moff == ida_idaapi.BADADDR:
+    if is_missing_member_offset(moff):
         return
     try:
         idc.set_member_cmt(sid, moff, text, 1)
