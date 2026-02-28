@@ -187,6 +187,33 @@ class utils(object):
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
             idc.set_member_type(sid, idc.get_member_offset(sid, mname), ida_bytes.FF_DATA|ida_bytes.FF_DWORD|ida_bytes.FF_0OFF, -1, 1, reftype=reftype)
+
+    def add_ptr_member(self, sid, mname, mtype_name=None, idx=-1):
+        if idx < 0:
+            idx = idc.get_member_qty(sid)
+
+        idc.add_struc_member(sid, mname, ida_idaapi.BADADDR, ida_bytes.FF_DATA | self.PTR_TYPE, -1, self.PTR_SIZE)
+        if mtype_name:
+            self.set_ptr_member(sid, mname, mtype_name, idx)
+
+    def set_ptr_member(self, sid, mname, mtype_name, idx=-1):
+        sname = idc.get_struc_name(sid)
+
+        if idx < 0:
+            idx = idc.get_member_qty(sid) - 1
+
+        ptr_size = ida_typeinf.TAPTR_PTR64 if self.x64 else 0
+        mtif = get_ptr_type(mtype_name, ptr_size=ptr_size)
+        if mtif is None:
+            return
+
+        if ida_9_or_later:
+            tif = ida_typeinf.tinfo_t()
+            tif.get_named_type(None, sname)
+            tif.set_udm_type(idx, mtif)
+        else:
+            s = ida_struct.get_struc(sid)
+            ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
         
     @staticmethod
     def get_moff_by_name(struc, name):
