@@ -88,7 +88,12 @@ class RTTITypeDescriptor(RTTIStruc):
         if bmangled is None:
             # not a real function name
             return
-        mangled = bmangled.decode('UTF-8')
+        try:
+            mangled = bmangled.decode('ascii')
+        except UnicodeDecodeError:
+            return
+        if len(mangled) < 2:
+            return
         
         # get demangled name
         #print("Mangled: " + mangled)
@@ -352,7 +357,11 @@ class RTTIBaseClassArray(RTTIStruc):
             if td.class_name:
                 bcd.name = strip(td.class_name)
                 self.bases.append(bcd)
-                
+
+        if not self.bases:
+            self.paths = {}
+            return
+                 
         # parse hierarchy
         result_paths = {}
         curr_path = []
@@ -410,7 +419,7 @@ class RTTIBaseClassArray(RTTIStruc):
         #print({x:[[z.name for z in y] for y in result_paths[x]] for x in result_paths}, col_offs)
         self.paths = result_paths
 
-        if col.offset not in self.paths or not self.paths[col.offset]:
+        if self.bases and (col.offset not in self.paths or not self.paths[col.offset]):
             print("Warning: Dispatching class hierarchy paths of the BCA at {:#x} for {} may be wrong because the paths list for the offset {} is empty. The paths will be misclassified as the wrong offset.".format(ea, self.bases[0].name, col.offset))
 
 
@@ -491,6 +500,10 @@ class rtti_parser(object):
     formats = [ida_ida.f_PE]
     
     @staticmethod
+    def _count_refs(ea):
+        return sum(1 for _ in u.get_refs_to(ea))
+
+    @staticmethod
     def parse(start, end):
         data_size = end-start
        
@@ -513,15 +526,21 @@ class rtti_parser(object):
         # ida fails to apply a structure type to bytes under some conditions, although create_struct returns True.
         # to avoid that, apply them again.
         ida_auto.auto_wait()
-        #print(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result]))
-        if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) != len([result[x].ea for x in result]):
-            [ida_bytes.create_struct(result[x].ea, RTTICompleteObjectLocator.size, RTTICompleteObjectLocator.tid, True) for x in result]
-        #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
-            [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
-        #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([result[x].td.ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([result[x].td.ea for x in result])):
-            [ida_bytes.create_struct(result[x].td.ea, result[x].td.size, RTTITypeDescriptor.tid, True) for x in result]
+        cols = list(result.values())
+        chd_eas = set([col.chd.ea for col in cols])
+        td_eas = set([col.td.ea for col in cols])
+        #print(rtti_parser._count_refs(RTTICompleteObjectLocator.tid), len([col.ea for col in cols]))
+        if rtti_parser._count_refs(RTTICompleteObjectLocator.tid) != len(cols):
+            for col in cols:
+                ida_bytes.create_struct(col.ea, RTTICompleteObjectLocator.size, RTTICompleteObjectLocator.tid, True)
+        #print(rtti_parser._count_refs(RTTIClassHierarchyDescriptor.tid), len(chd_eas))
+        if rtti_parser._count_refs(RTTIClassHierarchyDescriptor.tid) != len(chd_eas):
+            for col in cols:
+                ida_bytes.create_struct(col.chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True)
+        #print(rtti_parser._count_refs(RTTITypeDescriptor.tid), len(td_eas))
+        if rtti_parser._count_refs(RTTITypeDescriptor.tid) != len(td_eas):
+            for col in cols:
+                ida_bytes.create_struct(col.td.ea, col.td.size, RTTITypeDescriptor.tid, True)
             
         # for refreshing xrefs to get xrefs from COLs to TDs
         ida_auto.auto_wait()
@@ -544,33 +563,46 @@ class rtti_parser(object):
         # ida fails to apply a structure type to bytes under some conditions, although create_struct returns True.
         # to avoid that, apply them again.
         ida_auto.auto_wait()
-        #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) != len(set([result[x].chd.bca.ea for x in result])):
-            [ida_bytes.create_struct(result[x].chd.bca.ea, result[x].chd.bca.size, RTTIBaseClassArray.tid, True) for x in result]
-        #print(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result])):
-            [ida_bytes.create_struct(result[x].chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for x in result]
-        #print(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases])))
-        if len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]) != len(set([y.ea for x in result for y in result[x].chd.bca.bases])):
-            [[ida_bytes.create_struct(y.ea, RTTIBaseClassDescriptor.size, RTTIBaseClassDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
-        #print(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases])))
-        if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
-            [[ida_bytes.create_struct(y.tdea, RTTITypeDescriptor.size, RTTITypeDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result] + [y.chdea for x in result for y in result[x].chd.bca.bases])):
-            [[ida_bytes.create_struct(y.chdea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True) for y in result[x].chd.bca.bases] for x in result]
+        cols = list(result.values())
+        bases = [base for col in cols for base in col.chd.bca.bases]
+        bca_eas = set([col.chd.bca.ea for col in cols])
+        chd_eas = set([col.chd.ea for col in cols])
+        bcd_eas = set([base.ea for base in bases])
+        base_td_eas = set([base.tdea for base in bases])
+        all_td_eas = td_eas | base_td_eas
+        all_chd_eas = chd_eas | set([base.chdea for base in bases])
+        #print(rtti_parser._count_refs(RTTIBaseClassArray.tid), len(bca_eas))
+        if rtti_parser._count_refs(RTTIBaseClassArray.tid) != len(bca_eas):
+            for col in cols:
+                ida_bytes.create_struct(col.chd.bca.ea, col.chd.bca.size, RTTIBaseClassArray.tid, True)
+        #print(rtti_parser._count_refs(RTTIBaseClassDescriptor.tid), len(bcd_eas))
+        if rtti_parser._count_refs(RTTIBaseClassDescriptor.tid) != len(bcd_eas):
+            for base in bases:
+                ida_bytes.create_struct(base.ea, RTTIBaseClassDescriptor.size, RTTIBaseClassDescriptor.tid, True)
+        #print(rtti_parser._count_refs(RTTITypeDescriptor.tid), len(all_td_eas))
+        if rtti_parser._count_refs(RTTITypeDescriptor.tid) != len(all_td_eas):
+            for col in cols:
+                ida_bytes.create_struct(col.td.ea, col.td.size, RTTITypeDescriptor.tid, True)
+            for base in bases:
+                ida_bytes.create_struct(base.tdea, RTTITypeDescriptor.size, RTTITypeDescriptor.tid, True)
+        if rtti_parser._count_refs(RTTIClassHierarchyDescriptor.tid) != len(all_chd_eas):
+            for col in cols:
+                ida_bytes.create_struct(col.chd.ea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True)
+            for base in bases:
+                ida_bytes.create_struct(base.chdea, RTTIClassHierarchyDescriptor.size, RTTIClassHierarchyDescriptor.tid, True)
         ida_auto.auto_wait()
     
         # for debugging
-        if len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]) != len([result[x].ea for x in result]):
-            print("Warning: RTTICompleteObjectLocator found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTICompleteObjectLocator.tid)]), len([result[x].ea for x in result])))
-        if len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]) != len(set([result[x].chd.ea for x in result] + [y.chdea for x in result for y in result[x].chd.bca.bases])):
-            print("Warning: RTTIClassHierarchyDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIClassHierarchyDescriptor.tid)]), len(set([result[x].chd.ea for x in result] + [y.chdea for x in result for y in result[x].chd.bca.bases]))))
-        if len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]) != len(set([y.tdea for x in result for y in result[x].chd.bca.bases])):
-            print("Warning: RTTITypeDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTITypeDescriptor.tid)]), len(set([y.tdea for x in result for y in result[x].chd.bca.bases]))))
-        if len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]) != len(set([result[x].chd.bca.ea for x in result])):
-            print("Warning: RTTIBaseClassArray found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIBaseClassArray.tid)]), len(set([result[x].chd.bca.ea for x in result]))))
-        if len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]) != len(set([y.ea for x in result for y in result[x].chd.bca.bases])):
-            print("Warning: RTTIBaseClassDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(len([xrea for xrea in u.get_refs_to(RTTIBaseClassDescriptor.tid)]), len(set([y.ea for x in result for y in result[x].chd.bca.bases]))))
+        if rtti_parser._count_refs(RTTICompleteObjectLocator.tid) != len(cols):
+            print("Warning: RTTICompleteObjectLocator found and its xrefs are not matched (xrefs:{}, found: {})".format(rtti_parser._count_refs(RTTICompleteObjectLocator.tid), len(cols)))
+        if rtti_parser._count_refs(RTTIClassHierarchyDescriptor.tid) != len(all_chd_eas):
+            print("Warning: RTTIClassHierarchyDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(rtti_parser._count_refs(RTTIClassHierarchyDescriptor.tid), len(all_chd_eas)))
+        if rtti_parser._count_refs(RTTITypeDescriptor.tid) != len(all_td_eas):
+            print("Warning: RTTITypeDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(rtti_parser._count_refs(RTTITypeDescriptor.tid), len(all_td_eas)))
+        if rtti_parser._count_refs(RTTIBaseClassArray.tid) != len(bca_eas):
+            print("Warning: RTTIBaseClassArray found and its xrefs are not matched (xrefs:{}, found: {})".format(rtti_parser._count_refs(RTTIBaseClassArray.tid), len(bca_eas)))
+        if rtti_parser._count_refs(RTTIBaseClassDescriptor.tid) != len(bcd_eas):
+            print("Warning: RTTIBaseClassDescriptor found and its xrefs are not matched (xrefs:{}, found: {})".format(rtti_parser._count_refs(RTTIBaseClassDescriptor.tid), len(bcd_eas)))
         return result
 
     @staticmethod
