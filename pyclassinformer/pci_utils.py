@@ -241,6 +241,24 @@ class utils(object):
         else:
             s = ida_struct.get_struc(sid)
             ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0)
+
+    def set_member_tinfo(self, sid, mname, mtif, idx=-1):
+        if mtif is None:
+            return False
+
+        if idx < 0:
+            idx = idc.get_member_qty(sid) - 1
+
+        if ida_9_or_later:
+            return self._replace_named_udm_type(sid, idx, mtif)
+
+        s = ida_struct.get_struc(sid)
+        if s is None:
+            return False
+        try:
+            return bool(ida_struct.set_member_tinfo(s, s.get_member(idx), 0, mtif, 0))
+        except Exception:
+            return False
         
     @staticmethod
     def get_moff_by_name(struc, name):
