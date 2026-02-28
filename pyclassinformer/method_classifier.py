@@ -31,6 +31,13 @@ if tree_categorize:
     ida_idaapi.require("pyclassinformer.mc_tree")
     ida_idaapi.require("pyclassinformer.dirtree_utils")
 
+try:
+    import ida_hexrays
+except Exception:
+    ida_hexrays = None
+
+hexrays_initialized = False
+
 AUTO_RENAME_PREFIXES = ("sub_", "unknown_", "nullsub_", "j_", "thunk_")
 AUTO_GENERATED_NAMES = ("virtual_method_", "possible_ctor_or_dtor", "possible_constructor", "possible_destructor", "destructor", "scalar_deleting_destructor", "vector_deleting_destructor")
 CTOR_DTOR_REF_MNEMS = set(["mov", "lea", "adr", "adrp", "add", "str", "stp"])
@@ -111,6 +118,20 @@ def ensure_generated_member(sid, member_name, offset):
     return idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | u.PTR_TYPE, -1, u.PTR_SIZE)
 
 
+def ensure_generated_byte_member(sid, member_name, offset, size):
+    if size <= 0:
+        return 0
+
+    try:
+        existing_off = idc.get_member_offset(sid, member_name)
+    except Exception:
+        existing_off = ida_idaapi.BADADDR
+
+    if existing_off != ida_idaapi.BADADDR:
+        return 0
+    return idc.add_struc_member(sid, member_name, offset, ida_bytes.FF_DATA | ida_bytes.FF_BYTE, -1, size)
+
+
 def append_comment(ea, text, repeatable=1):
     current = idc.get_cmt(ea, repeatable) or ""
     if text in current:
@@ -118,6 +139,35 @@ def append_comment(ea, text, repeatable=1):
     if current:
         text = current + " | " + text
     idc.set_cmt(ea, text, repeatable)
+
+
+def initialize_hexrays():
+    global hexrays_initialized
+    if ida_hexrays is None:
+        return False
+    if hexrays_initialized:
+        return True
+    try:
+        hexrays_initialized = bool(ida_hexrays.init_hexrays_plugin())
+    except Exception:
+        hexrays_initialized = False
+    return hexrays_initialized
+
+
+def refresh_hexrays_function(func_ea):
+    if not initialize_hexrays():
+        return False
+
+    try:
+        ida_hexrays.mark_cfunc_dirty(func_ea, False)
+    except Exception:
+        pass
+
+    try:
+        cfunc = ida_hexrays.decompile(func_ea)
+    except Exception:
+        return False
+    return cfunc is not None
 
 
 def get_code_ref_targets(ea):
@@ -335,6 +385,10 @@ def get_vfptr_member_name(offset):
     return "vfptr_%x" % offset
 
 
+def get_gap_member_name(offset):
+    return "gap_%x" % offset
+
+
 def build_method_decl(class_type_name, kind, func_token="pci_method"):
     class_ref = "struct %s" % class_type_name
     callconv = "__thiscall "
@@ -416,7 +470,11 @@ def apply_vtable_struct_type(entry):
 
 
 def annotate_ctor_call_sites(func_ea, owner_name, owner_type_name):
+    caller_funcs = set()
     for call_ea in idautils.CodeRefsTo(func_ea, 0):
+        caller = ida_funcs.get_func(call_ea)
+        if caller:
+            caller_funcs.add(caller.start_ea)
         append_comment(call_ea, "%s: constructs %s (%s)" % (COMMENT_TAG, owner_name, owner_type_name), 0)
         for prev_ea in get_prev_code_items(call_ea, max_count=6):
             mnem = (idc.print_insn_mnem(prev_ea) or "").lower()
@@ -428,17 +486,21 @@ def annotate_ctor_call_sites(func_ea, owner_name, owner_type_name):
             if any(is_operator_new_like_target(target) for target in targets):
                 append_comment(prev_ea, "%s: likely allocates object for %s" % (COMMENT_TAG, owner_name), 0)
                 break
+    return caller_funcs
 
 
 def build_decompilation_context(paths, data):
     class_type_names = {}
     layouts = {}
     vtables = []
+    entry_size_estimates = {}
+    class_size_estimates = {}
 
     for vftable_ea in data:
         col = data[vftable_ea]
         if col.name not in class_type_names:
             class_type_names[col.name] = build_generated_type_name("class", col.name)
+            class_size_estimates[col.name] = u.PTR_SIZE
 
     for vftable_ea in paths:
         col = data[vftable_ea]
@@ -447,6 +509,7 @@ def build_decompilation_context(paths, data):
 
         if owner_name not in class_type_names:
             class_type_names[owner_name] = build_generated_type_name("class", owner_name)
+            class_size_estimates[owner_name] = u.PTR_SIZE
 
         entry = {
             "vftable_ea": vftable_ea,
@@ -461,10 +524,46 @@ def build_decompilation_context(paths, data):
         vtables.append(entry)
         layouts.setdefault(owner_name, []).append(entry)
 
-    return class_type_names, layouts, vtables
+    for _ in range(max(1, len(class_size_estimates))):
+        changed = False
+        for owner_name in layouts:
+            owner_entries = sorted(layouts[owner_name], key=lambda x: x["offset"])
+            owner_size = class_size_estimates.get(owner_name, u.PTR_SIZE)
+            for idx, entry in enumerate(owner_entries):
+                next_offset = None
+                if idx + 1 < len(owner_entries):
+                    next_offset = owner_entries[idx + 1]["offset"]
+
+                sub_size = max(u.PTR_SIZE, class_size_estimates.get(entry["subobject_name"], u.PTR_SIZE))
+                if next_offset is not None:
+                    sub_size = max(sub_size, next_offset - entry["offset"])
+
+                owner_size = max(owner_size, entry["offset"] + sub_size)
+
+            if owner_size > class_size_estimates.get(owner_name, u.PTR_SIZE):
+                class_size_estimates[owner_name] = owner_size
+                changed = True
+        if not changed:
+            break
+
+    for owner_name in layouts:
+        owner_entries = sorted(layouts[owner_name], key=lambda x: x["offset"])
+        for idx, entry in enumerate(owner_entries):
+            size_guess = max(u.PTR_SIZE, class_size_estimates.get(entry["subobject_name"], u.PTR_SIZE))
+            if idx + 1 < len(owner_entries):
+                size_guess = max(size_guess, owner_entries[idx + 1]["offset"] - entry["offset"])
+            entry_size_estimates[(owner_name, entry["offset"])] = size_guess
+
+    return class_type_names, layouts, vtables, entry_size_estimates
 
 
-def generate_decompilation_types(class_type_names, layouts, vtables):
+def add_generated_tail_member(sid, member_name, offset, size):
+    if size <= 0:
+        return 0
+    return ensure_generated_byte_member(sid, member_name, offset, size)
+
+
+def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates):
     for class_name in class_type_names:
         type_name = class_type_names[class_name]
         sid = ensure_generated_struct(type_name)
@@ -495,22 +594,60 @@ def generate_decompilation_types(class_type_names, layouts, vtables):
 
     for owner_name in layouts:
         sid = idc.get_struc_id(class_type_names[owner_name])
+        owner_entries = sorted(layouts[owner_name], key=lambda x: x["offset"])
         seen_offsets = set()
-        for entry in sorted(layouts[owner_name], key=lambda x: x["offset"]):
+        cursor = 0
+
+        for idx, entry in enumerate(owner_entries):
             if entry["offset"] in seen_offsets:
                 continue
             seen_offsets.add(entry["offset"])
+
+            if entry["offset"] > cursor:
+                gap_size = entry["offset"] - cursor
+                gap_name = get_gap_member_name(cursor)
+                if ensure_generated_byte_member(sid, gap_name, cursor, gap_size) == 0:
+                    set_member_comment(sid, gap_name, "%s: reserved gap up to %#x" % (COMMENT_TAG, entry["offset"]))
+                cursor = entry["offset"]
+
             member_name = get_vfptr_member_name(entry["offset"])
             if add_generated_ptr_member(sid, member_name, entry["offset"], entry["vtbl_type_name"]) == 0:
                 set_member_comment(sid, member_name, "%s: vfptr for %s (offset %#x)" % (COMMENT_TAG, entry["subobject_name"], entry["offset"]))
 
+            estimate = entry_size_estimates.get((owner_name, entry["offset"]), u.PTR_SIZE)
+            next_offset = None
+            if idx + 1 < len(owner_entries):
+                next_offset = owner_entries[idx + 1]["offset"]
+            if next_offset is not None:
+                estimate = min(estimate, max(u.PTR_SIZE, next_offset - entry["offset"]))
+            estimate = max(estimate, u.PTR_SIZE)
+
+            tail_size = max(0, estimate - u.PTR_SIZE)
+            tail_offset = entry["offset"] + u.PTR_SIZE
+            if next_offset is not None:
+                tail_size = min(tail_size, max(0, next_offset - tail_offset))
+            if tail_size > 0:
+                tail_name = "%s_tail" % get_vfptr_member_name(entry["offset"])
+                if add_generated_tail_member(sid, tail_name, tail_offset, tail_size) == 0:
+                    set_member_comment(sid, tail_name, "%s: estimated body for %s subobject" % (COMMENT_TAG, entry["subobject_name"]))
+
+            cursor = max(cursor, entry["offset"] + estimate)
+
+
+def refresh_decompiler_views(func_eas):
+    if not initialize_hexrays():
+        return
+    for func_ea in sorted(set(func_eas)):
+        refresh_hexrays_function(func_ea)
+
 
 def improve_decompilation(paths, data, config):
-    class_type_names, layouts, vtables = build_decompilation_context(paths, data)
-    generate_decompilation_types(class_type_names, layouts, vtables)
+    class_type_names, layouts, vtables, entry_size_estimates = build_decompilation_context(paths, data)
+    generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates)
 
     typed_virtuals = set()
     typed_refs = set()
+    refreshed_funcs = set()
     for entry in vtables:
         col = entry["col"]
         is_lib = (col.libflag == col.LIBLIB)
@@ -527,6 +664,7 @@ def improve_decompilation(paths, data, config):
                 if kind == "thunk" and thunk_target != ida_idaapi.BADADDR:
                     append_comment(func_ea, "%s: adjusts self %s then jumps to %#x" % (COMMENT_TAG, format_signed_offset(thunk_adjust), thunk_target), 1)
                 typed_virtuals.add(func_ea)
+                refreshed_funcs.add(func_ea)
 
         for f in get_vftable_ref_funcs(entry["vftable_ea"]):
             ref_kind = get_ctor_dtor_kind(f.start_ea)
@@ -536,12 +674,15 @@ def improve_decompilation(paths, data, config):
                 apply_generated_signature(f.start_ea, entry["owner_type_name"], ref_kind)
                 append_comment(f.start_ea, "%s: %s for %s" % (COMMENT_TAG, ref_kind, entry["owner_name"]), 1)
                 if ref_kind == "possible_constructor":
-                    annotate_ctor_call_sites(f.start_ea, entry["owner_name"], entry["owner_type_name"])
+                    refreshed_funcs.update(annotate_ctor_call_sites(f.start_ea, entry["owner_name"], entry["owner_type_name"]))
                 typed_refs.add(f.start_ea)
+                refreshed_funcs.add(f.start_ea)
 
         vfptr_member_name = get_vfptr_member_name(entry["offset"])
         for refea in idautils.DataRefsTo(entry["vftable_ea"]):
             append_comment(refea, "%s: writes %s::%s -> %s" % (COMMENT_TAG, entry["owner_name"], vfptr_member_name, entry["vtbl_type_name"]), 1)
+
+    refresh_decompiler_views(refreshed_funcs)
 
 
 def is_probable_ctor_dtor_ref(f, refea, byte_window=0x80):
