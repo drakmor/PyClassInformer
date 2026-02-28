@@ -221,6 +221,59 @@ def build_function_ptr_tinfo(func_ea, fallback_decl):
     return parse_decl_tinfo(fallback_decl)
 
 
+def get_class_ptr_tinfo(class_type_name):
+    return parse_decl_tinfo(build_class_ptr_decl(class_type_name))
+
+
+def get_struct_member_tinfo(type_name):
+    return parse_decl_tinfo("struct %s __pci_tmp;" % type_name)
+
+
+def build_adjusted_method_tinfo(func_ea, class_type_name, kind):
+    base_tif = get_function_tinfo(func_ea)
+    if base_tif is None or not base_tif.is_func():
+        return None
+
+    class_ptr_tif = get_class_ptr_tinfo(class_type_name)
+    if class_ptr_tif is None:
+        return None
+
+    ftd = ida_typeinf.func_type_data_t()
+    try:
+        if not base_tif.get_func_details(ftd):
+            return None
+    except Exception:
+        return None
+
+    if len(ftd) > 0:
+        try:
+            farg = ida_typeinf.funcarg_t(ftd[0])
+            farg.type = class_ptr_tif
+            ftd[0] = farg
+        except Exception:
+            return None
+    elif kind in ("constructor", "possible_constructor", "destructor", "possible_destructor", "scalar_deleting_destructor", "vector_deleting_destructor"):
+        return None
+
+    if kind in ("constructor", "possible_constructor"):
+        ftd.rettype = class_ptr_tif
+
+    tif = ida_typeinf.tinfo_t()
+    try:
+        if tif.create_func(ftd):
+            return tif
+    except Exception:
+        pass
+    return None
+
+
+def get_decomp_mode(config):
+    mode = getattr(config, "decomp_mode", "balanced")
+    if mode not in ("safe", "balanced", "aggressive"):
+        mode = "balanced"
+    return mode
+
+
 def decode_instruction(ea):
     insn = ida_ua.insn_t()
     try:
@@ -252,9 +305,20 @@ def contains_this_reg(op_text):
     return any(reg in op_text for reg in THIS_REG_NAMES)
 
 
+def looks_like_memory_operand(op_text):
+    op_text = (op_text or "").lower()
+    if not op_text:
+        return False
+    if "[" in op_text or "]" in op_text:
+        return True
+    if " ptr " in op_text:
+        return True
+    return False
+
+
 def extract_this_offset_from_operand(ea, op_idx):
     op_text = (idc.print_operand(ea, op_idx) or "").lower()
-    if not op_text or not contains_this_reg(op_text):
+    if not op_text or not contains_this_reg(op_text) or not looks_like_memory_operand(op_text):
         return None
 
     value = None
@@ -336,14 +400,14 @@ def get_this_store_info(ea):
     mnem = (idc.print_insn_mnem(ea) or "").lower()
     ops = [(idc.print_operand(ea, i) or "") for i in range(4)]
 
-    if ops[0] and contains_this_reg(ops[0]):
+    if ops[0] and contains_this_reg(ops[0]) and looks_like_memory_operand(ops[0]):
         src_idxs = [i for i in range(1, 4) if ops[i]]
         if src_idxs:
             return 0, src_idxs, ops, mnem
 
     if mnem.startswith("st"):
         for mem_idx in (2, 1, 3):
-            if mem_idx < len(ops) and ops[mem_idx] and contains_this_reg(ops[mem_idx]):
+            if mem_idx < len(ops) and ops[mem_idx] and contains_this_reg(ops[mem_idx]) and looks_like_memory_operand(ops[mem_idx]):
                 src_idxs = [i for i in range(mem_idx) if ops[i]]
                 if src_idxs:
                     return mem_idx, src_idxs, ops, mnem
@@ -465,6 +529,15 @@ def clear_generated_layout_members(sid):
                 idc.del_struc_member(sid, offset)
             except Exception:
                 pass
+
+
+def clear_all_generated_members(sid):
+    members = list(idautils.StructMembers(sid))
+    for offset, _, _ in reversed(members):
+        try:
+            idc.del_struc_member(sid, offset)
+        except Exception:
+            pass
 
 
 def get_code_ref_targets(ea):
@@ -741,6 +814,14 @@ def apply_generated_signature(func_ea, class_type_name, kind, force=False):
     if current_type and not force and not is_auto_named(current_name) and TYPE_PREFIX not in current_type:
         return False
 
+    exact_tif = build_adjusted_method_tinfo(f.start_ea, class_type_name, kind)
+    if exact_tif is not None:
+        try:
+            if ida_typeinf.apply_tinfo(f.start_ea, exact_tif, ida_typeinf.TINFO_DEFINITE):
+                return True
+        except Exception:
+            pass
+
     decl = build_method_decl(class_type_name, kind)
     try:
         return bool(idc.SetType(f.start_ea, decl))
@@ -945,6 +1026,238 @@ def apply_hexrays_ctor_result_type(func_ea, class_type_name, cfunc_cache=None):
     return apply_hexrays_lvar_type(func_ea, target.name, build_class_ptr_decl(class_type_name), cfunc_cache)
 
 
+def strip_ctree_wrappers(expr):
+    while expr is not None and expr.op in (ida_hexrays.cot_cast, ida_hexrays.cot_ref):
+        expr = expr.x
+    return expr
+
+
+def cexpr_is_thisarg(expr):
+    expr = strip_ctree_wrappers(expr)
+    if expr is None or expr.op != ida_hexrays.cot_var:
+        return False
+    try:
+        lv = expr.v.getv()
+    except Exception:
+        return False
+    try:
+        if lv.is_thisarg():
+            return True
+    except Exception:
+        pass
+    try:
+        if lv.is_arg_var() and (lv.name or "").lower() in ("this", "self", "a1", "arg1", "arg0"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def get_ctree_expr_size(expr):
+    expr = strip_ctree_wrappers(expr)
+    if expr is None:
+        return 0
+    try:
+        if expr.refwidth and expr.refwidth > 0:
+            return int(expr.refwidth)
+    except Exception:
+        pass
+    try:
+        if expr.op == ida_hexrays.cot_memptr and expr.ptrsize > 0:
+            return int(expr.ptrsize)
+    except Exception:
+        pass
+    try:
+        size = expr.type.get_size()
+        if size and size > 0:
+            return int(size)
+    except Exception:
+        pass
+    return 0
+
+
+def get_ctree_field_kind(expr, size, vtable_eas):
+    expr = strip_ctree_wrappers(expr)
+    if expr is None:
+        return "scalar"
+
+    try:
+        if expr.is_vftable():
+            return None
+    except Exception:
+        pass
+
+    if expr.op == ida_hexrays.cot_obj and expr.obj_ea in vtable_eas:
+        return None
+    if expr.op in (ida_hexrays.cot_obj, ida_hexrays.cot_str):
+        return "ptr"
+
+    try:
+        tif = expr.type
+    except Exception:
+        tif = None
+
+    if tif is not None:
+        try:
+            if tif.is_ptr():
+                return "ptr"
+        except Exception:
+            pass
+        try:
+            if tif.is_double():
+                return "double"
+        except Exception:
+            pass
+        try:
+            if tif.is_float() or tif.is_floating():
+                return "float" if size <= 4 else "double"
+        except Exception:
+            pass
+
+    if expr.op == ida_hexrays.cot_call:
+        callee = strip_ctree_wrappers(expr.x)
+        if callee is not None and callee.op == ida_hexrays.cot_obj and is_operator_new_like_target(callee.obj_ea):
+            return "ptr"
+
+    return "scalar"
+
+
+def cexpr_member_uses_union_index(expr):
+    expr = strip_ctree_wrappers(expr)
+    if expr is None or expr.op not in (ida_hexrays.cot_memptr, ida_hexrays.cot_memref):
+        return False
+
+    base = strip_ctree_wrappers(expr.x)
+    if base is None:
+        return False
+
+    try:
+        tif = base.type
+    except Exception:
+        return False
+
+    try:
+        if expr.op == ida_hexrays.cot_memptr and tif.is_ptr():
+            tif = tif.get_pointed_object()
+    except Exception:
+        pass
+
+    try:
+        return bool(tif and tif.is_union())
+    except Exception:
+        return False
+
+
+if ida_hexrays is not None:
+    class ctor_field_collector_t(ida_hexrays.ctree_visitor_t):
+        def __init__(self, owner_name, owner_vfptr_offsets, vtable_eas):
+            ida_hexrays.ctree_visitor_t.__init__(self, ida_hexrays.CV_FAST)
+            self.owner_name = owner_name
+            self.owner_vfptr_offsets = owner_vfptr_offsets
+            self.vtable_eas = vtable_eas
+            self.fields = {}
+
+        def visit_expr(self, expr):
+            if expr.op != ida_hexrays.cot_asg:
+                return 0
+
+            lhs = strip_ctree_wrappers(expr.x)
+            if lhs is None or lhs.op not in (ida_hexrays.cot_memptr, ida_hexrays.cot_memref):
+                return 0
+            if not cexpr_is_thisarg(lhs.x):
+                return 0
+            if cexpr_member_uses_union_index(lhs):
+                return 0
+
+            offset = int(lhs.m)
+            if offset < 0 or offset > 0x2000 or offset in self.owner_vfptr_offsets:
+                return 0
+
+            rhs = strip_ctree_wrappers(expr.y)
+            size = get_ctree_expr_size(lhs) or get_ctree_expr_size(rhs) or u.PTR_SIZE
+            if size <= 0:
+                size = u.PTR_SIZE
+            if size > 0x40:
+                size = u.PTR_SIZE
+
+            kind = get_ctree_field_kind(rhs, size, self.vtable_eas)
+            if kind is None:
+                return 0
+
+            record = self.fields.get(offset)
+            if record is None:
+                record = {"offset": offset, "size": size, "kind": kind, "writes": 0}
+                self.fields[offset] = record
+            else:
+                record["size"] = max(record["size"], size)
+                record["kind"] = merge_field_kind(record.get("kind"), kind)
+            record["writes"] += 1
+            return 0
+else:
+    class ctor_field_collector_t(object):
+        def __init__(self, owner_name, owner_vfptr_offsets, vtable_eas):
+            self.fields = {}
+
+
+def merge_recovered_field_maps(base_fields, new_fields):
+    merged = {}
+    for owner_name, fields in base_fields.items():
+        merged[owner_name] = {}
+        for offset, field in fields.items():
+            merged[owner_name][offset] = dict(field)
+
+    for owner_name, fields in new_fields.items():
+        owner_map = merged.setdefault(owner_name, {})
+        for offset, field in fields.items():
+            cur = owner_map.get(offset)
+            if cur is None:
+                owner_map[offset] = dict(field)
+                continue
+            cur["size"] = max(cur.get("size", 0), field.get("size", 0))
+            cur["kind"] = merge_field_kind(cur.get("kind"), field.get("kind"))
+            cur["writes"] = max(cur.get("writes", 0), field.get("writes", 0))
+    return merged
+
+
+def collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache):
+    if ida_hexrays is None or not initialize_hexrays():
+        return {}
+
+    vtable_eas = set(entry["vftable_ea"] for entry in vtables)
+    owner_vfptr_offsets = {}
+    for owner_name in layouts:
+        owner_vfptr_offsets[owner_name] = set(x["offset"] for x in layouts[owner_name])
+
+    fields = {}
+    ctor_map = {}
+    for entry in vtables:
+        owner_name = entry["owner_name"]
+        for f in get_vftable_ref_funcs(entry["vftable_ea"]):
+            if get_ctor_dtor_kind(f.start_ea) == "possible_constructor":
+                ctor_map.setdefault(owner_name, set()).add(f.start_ea)
+
+    for owner_name, funcs in ctor_map.items():
+        owner_fields = fields.setdefault(owner_name, {})
+        for func_ea in funcs:
+            cfunc = get_cfunc_cached(func_ea, cfunc_cache)
+            if cfunc is None:
+                continue
+            visitor = ctor_field_collector_t(owner_name, owner_vfptr_offsets.get(owner_name, set()), vtable_eas)
+            try:
+                visitor.apply_to_exprs(cfunc.body, None)
+            except Exception:
+                continue
+            for offset, field in visitor.fields.items():
+                cur = owner_fields.get(offset)
+                if cur is None:
+                    owner_fields[offset] = dict(field)
+                else:
+                    cur["size"] = max(cur["size"], field["size"])
+                    cur["kind"] = merge_field_kind(cur.get("kind"), field.get("kind"))
+                    cur["writes"] = max(cur.get("writes", 0), field.get("writes", 0))
+    return fields
+
+
 def build_decompilation_context(paths, data):
     class_type_names = {}
     layouts = {}
@@ -976,6 +1289,7 @@ def build_decompilation_context(paths, data):
             "offset": col.offset,
             "col": col,
             "vtbl_type_name": build_generated_type_name("vtbl", owner_name, col.offset),
+            "embed_type_name": build_generated_type_name("subobj", "%s_%s" % (owner_name, col.name), col.offset),
         }
         vtables.append(entry)
         layouts.setdefault(owner_name, []).append(entry)
@@ -1017,6 +1331,25 @@ def add_generated_tail_member(sid, member_name, offset, size):
     if size <= 0:
         return 0
     return ensure_generated_byte_member(sid, member_name, offset, size)
+
+
+def generate_embedded_subobject_type(entry, entry_size_estimates):
+    sid = ensure_generated_struct(entry["embed_type_name"])
+    idc.set_struc_cmt(sid, "%s: embedded subobject type for %s in %s (offset %#x)" % (
+        COMMENT_TAG,
+        entry["subobject_name"],
+        entry["owner_name"],
+        entry["offset"]), 1)
+    clear_generated_layout_members(sid)
+
+    add_generated_ptr_member(sid, "vfptr", 0, entry["vtbl_type_name"])
+    set_member_comment(sid, "vfptr", "%s: vfptr for %s embedded subobject" % (COMMENT_TAG, entry["subobject_name"]))
+
+    estimate = max(u.PTR_SIZE, entry_size_estimates.get((entry["owner_name"], entry["offset"]), u.PTR_SIZE))
+    tail_size = max(0, estimate - u.PTR_SIZE)
+    if tail_size > 0:
+        ensure_generated_byte_member(sid, "gap_%x" % u.PTR_SIZE, u.PTR_SIZE, tail_size)
+        set_member_comment(sid, "gap_%x" % u.PTR_SIZE, "%s: estimated embedded subobject tail" % COMMENT_TAG)
 
 
 def collect_virtual_inheritance_hints(paths):
@@ -1125,16 +1458,10 @@ def build_class_layout_plan(owner_name, layouts, entry_size_estimates, recovered
         reserve(offset, size)
 
     owner_entries = sorted(layouts.get(owner_name, []), key=lambda x: x["offset"])
+    owner_field_offsets = sorted(recovered_fields.get(owner_name, {}).keys())
+    owner_vbptr_offsets = set(virtual_hints.get(owner_name, {}).keys())
     class_size = 0
     for idx, entry in enumerate(owner_entries):
-        append_member(
-            entry["offset"],
-            u.PTR_SIZE,
-            get_vfptr_member_name(entry["offset"]),
-            "vfptr",
-            "%s: vfptr for %s (offset %#x)" % (COMMENT_TAG, entry["subobject_name"], entry["offset"]),
-            target_type_name=entry["vtbl_type_name"])
-
         estimate = entry_size_estimates.get((owner_name, entry["offset"]), u.PTR_SIZE)
         next_offset = None
         if idx + 1 < len(owner_entries):
@@ -1142,6 +1469,40 @@ def build_class_layout_plan(owner_name, layouts, entry_size_estimates, recovered
         if next_offset is not None:
             estimate = min(estimate, max(u.PTR_SIZE, next_offset - entry["offset"]))
         estimate = max(estimate, u.PTR_SIZE)
+
+        use_embedded = False
+        if entry["offset"] > 0 and estimate > u.PTR_SIZE:
+            sub_end = entry["offset"] + estimate
+            conflict = False
+            for foff in owner_field_offsets:
+                if entry["offset"] <= foff < sub_end:
+                    conflict = True
+                    break
+            if not conflict:
+                for voff in owner_vbptr_offsets:
+                    if entry["offset"] <= voff < sub_end:
+                        conflict = True
+                        break
+            if not conflict:
+                use_embedded = True
+
+        if use_embedded:
+            append_member(
+                entry["offset"],
+                estimate,
+                "base_%x_%s" % (entry["offset"], normalize_identifier(entry["subobject_name"], fallback="base", max_len=24)),
+                "embedded",
+                "%s: embedded base subobject %s" % (COMMENT_TAG, entry["subobject_name"]),
+                target_type_name=entry["embed_type_name"])
+        else:
+            append_member(
+                entry["offset"],
+                u.PTR_SIZE,
+                get_vfptr_member_name(entry["offset"]),
+                "vfptr",
+                "%s: vfptr for %s (offset %#x)" % (COMMENT_TAG, entry["subobject_name"], entry["offset"]),
+                target_type_name=entry["vtbl_type_name"])
+
         class_size = max(class_size, entry["offset"] + estimate)
 
     for offset, comment in sorted(virtual_hints.get(owner_name, {}).items()):
@@ -1207,6 +1568,7 @@ def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_
     for entry in vtables:
         sid = ensure_generated_struct(entry["vtbl_type_name"])
         idc.set_struc_cmt(sid, "%s: generated vtable type for %s (offset %#x)" % (COMMENT_TAG, entry["owner_name"], entry["offset"]), 1)
+        clear_all_generated_members(sid)
 
         used_names = set()
         for slot_index, func_ea in enumerate(entry["col"].vfeas):
@@ -1227,6 +1589,8 @@ def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_
             set_member_comment(sid, member_name, member_comment)
 
         apply_vtable_struct_type(entry)
+        if entry["offset"] > 0:
+            generate_embedded_subobject_type(entry, entry_size_estimates)
 
     for owner_name in layouts:
         sid = idc.get_struc_id(class_type_names[owner_name])
@@ -1241,11 +1605,17 @@ def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_
                 r = add_generated_ptr_member(sid, member["name"], member["offset"])
             elif member["kind"] == "gap":
                 r = ensure_generated_byte_member(sid, member["name"], member["offset"], member["size"])
+            elif member["kind"] == "embedded":
+                r = ensure_generated_sized_member(sid, member["name"], member["offset"], member["size"])
             else:
                 r = ensure_generated_sized_member(sid, member["name"], member["offset"], member["size"])
 
             if r == 0 and member["comment"]:
                 set_member_comment(sid, member["name"], member["comment"])
+            if r == 0 and member["kind"] == "embedded":
+                embed_tif = get_struct_member_tinfo(member["target_type_name"])
+                if embed_tif is not None:
+                    u.set_member_tinfo(sid, member["name"], embed_tif)
             if r == 0 and member["kind"] in ("float", "double"):
                 scalar_tif = parse_decl_tinfo("%s __pci_tmp;" % member["kind"])
                 if scalar_tif is not None:
@@ -1261,17 +1631,23 @@ def refresh_decompiler_views(func_eas, cfunc_cache=None):
 
 
 def improve_decompilation(paths, data, config):
+    decomp_mode = get_decomp_mode(config)
     class_type_names, layouts, vtables, entry_size_estimates = build_decompilation_context(paths, data)
-    recovered_fields = collect_constructor_field_writes(layouts, vtables)
-    virtual_hints = collect_virtual_inheritance_hints(paths)
+    cfunc_cache = {}
+    recovered_fields = {}
+    virtual_hints = {}
+    if decomp_mode in ("balanced", "aggressive"):
+        recovered_fields = collect_constructor_field_writes(layouts, vtables)
+        recovered_fields = merge_recovered_field_maps(recovered_fields, collect_constructor_field_writes_ctree(layouts, vtables, cfunc_cache))
+        virtual_hints = collect_virtual_inheritance_hints(paths)
     generate_decompilation_types(class_type_names, layouts, vtables, entry_size_estimates, recovered_fields, virtual_hints)
+    cfunc_cache.clear()
 
     typed_virtuals = set()
     typed_refs = set()
     thisarg_types = {}
     ctor_callers = {}
     refreshed_funcs = set()
-    cfunc_cache = {}
     for entry in vtables:
         col = entry["col"]
         is_lib = (col.libflag == col.LIBLIB)
@@ -1316,13 +1692,13 @@ def improve_decompilation(paths, data, config):
             append_comment(refea, "%s: writes %s::%s -> %s" % (COMMENT_TAG, entry["owner_name"], vfptr_member_name, entry["vtbl_type_name"]), 1)
 
     for func_ea, class_type_name in thisarg_types.items():
-        if apply_hexrays_thisarg_type(func_ea, class_type_name, cfunc_cache):
+        if decomp_mode != "safe" and apply_hexrays_thisarg_type(func_ea, class_type_name, cfunc_cache):
             refreshed_funcs.add(func_ea)
 
     for caller_ea, class_type_name in ctor_callers.items():
         if not class_type_name:
             continue
-        if apply_hexrays_ctor_result_type(caller_ea, class_type_name, cfunc_cache):
+        if decomp_mode == "aggressive" and apply_hexrays_ctor_result_type(caller_ea, class_type_name, cfunc_cache):
             refreshed_funcs.add(caller_ea)
 
     refresh_decompiler_views(refreshed_funcs, cfunc_cache)
