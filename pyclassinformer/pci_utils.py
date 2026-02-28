@@ -41,8 +41,9 @@ class utils(object):
     text = 0
     data = 0
     rdata = 0
+    code_ranges = []
     valid_ranges = []
-    within = lambda self, x, rl: any([True for r in rl if r[0]<=x<=r[1]])
+    within = lambda self, x, rl: any(r[0] <= x < r[1] for r in rl)
 
     REF_OFF = 0
     x64 = 0
@@ -53,6 +54,11 @@ class utils(object):
         self.text = ida_segment.get_segm_by_name(".text")
         self.data = ida_segment.get_segm_by_name(".data")
         self.rdata = ida_segment.get_segm_by_name(".rdata")
+        self.code_ranges = []
+        for seg in self.get_code_segments():
+            self.code_ranges.append((seg.start_ea, seg.end_ea))
+            if self.text is None:
+                self.text = seg
         # try to use rdata if there actually is an rdata segment, otherwise just use data
         if self.rdata is not None and self.data is not None:
             self.valid_ranges = [(self.rdata.start_ea, self.rdata.end_ea), (self.data.start_ea, self.data.end_ea)]
@@ -75,7 +81,17 @@ class utils(object):
             self.REF_OFF = ida_nalt.REF_OFF32
             self.PTR_SIZE = 4
             self.get_ptr = ida_bytes.get_32bit
-            
+
+    @staticmethod
+    def get_code_segments():
+        segperm_exec = getattr(ida_segment, "SEGPERM_EXEC", 4)
+        for n in range(ida_segment.get_segm_qty()):
+            seg = ida_segment.getnseg(n)
+            if not seg or seg.is_header_segm():
+                continue
+            if ida_segment.get_segm_class(seg) == "CODE" or (getattr(seg, "perm", 0) & segperm_exec):
+                yield seg
+             
     @staticmethod
     def get_data_segments():
         for n in range(ida_segment.get_segm_qty()):
@@ -109,9 +125,11 @@ class utils(object):
         return strlen
 
     def is_vtable(self, addr):
+        if not self.code_ranges:
+            return False
         function = self.get_ptr(addr)
         # Check if vtable has ref and its first pointer lies within code segment
-        if ida_bytes.has_xref(ida_bytes.get_full_flags(addr)) and function >= self.text.start_ea and function <= self.text.end_ea:
+        if ida_bytes.has_xref(ida_bytes.get_full_flags(addr)) and self.within(function, self.code_ranges):
             return True
         return False
 
