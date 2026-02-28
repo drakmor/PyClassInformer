@@ -1,8 +1,10 @@
 import binascii
+import re
 import idc
 import ida_bytes
 import ida_idaapi
 import ida_funcs
+import ida_typeinf
 import ida_idp
 import ida_name
 import idautils
@@ -47,6 +49,7 @@ DELETE_CALLEE_HINTS = ("??3", "operator delete", "__imp_??3", " free", "_free", 
 ALLOC_CALLEE_HINTS = ("??2", "operator new", "malloc", "calloc", "realloc", "HeapAlloc")
 TYPE_PREFIX = "pci__"
 COMMENT_TAG = "PyClassInformer"
+AUTO_LOCAL_PTR_RE = re.compile(r"^(v\d+|ptr|p|obj|object|result)$", re.IGNORECASE)
 
 
 def is_auto_named(func_name):
@@ -168,6 +171,29 @@ def refresh_hexrays_function(func_ea):
     except Exception:
         return False
     return cfunc is not None
+
+
+def parse_decl_tinfo(decl):
+    tif = ida_typeinf.tinfo_t()
+    flags = getattr(ida_typeinf, "PT_SIL", 0)
+    candidates = [decl]
+    stripped = decl.strip()
+    if stripped.endswith(";") and "(*" not in stripped and "(" not in stripped:
+        candidates.append("%s __pci_tmp;" % stripped[:-1].rstrip())
+
+    for candidate in candidates:
+        try:
+            if ida_typeinf.parse_decl(tif, None, candidate, flags):
+                return tif
+        except Exception:
+            pass
+
+        try:
+            if ida_typeinf.parse_decl(tif, None, candidate, 0):
+                return tif
+        except Exception:
+            pass
+    return None
 
 
 def get_code_ref_targets(ea):
@@ -403,6 +429,10 @@ def build_method_decl(class_type_name, kind, func_token="pci_method"):
     return "void %s%s(%s *self, ...);" % (callconv, func_token, class_ref)
 
 
+def build_class_ptr_decl(class_type_name):
+    return "struct %s *;" % class_type_name
+
+
 def build_vtable_slot_decl(class_type_name, kind, slot_index):
     class_ref = "struct %s" % class_type_name
     slot_name = "slot_%u" % slot_index
@@ -446,6 +476,14 @@ def apply_vtable_slot_type(slot_ea, class_type_name, kind, slot_index):
         return False
 
 
+def apply_vtable_member_type(sid, member_name, class_type_name, kind, slot_index):
+    decl = build_vtable_slot_decl(class_type_name, kind, slot_index)
+    tif = parse_decl_tinfo(decl)
+    if tif is None:
+        return False
+    return u.set_member_tinfo(sid, member_name, tif, idx=slot_index)
+
+
 def apply_vtable_struct_type(entry):
     sid = idc.get_struc_id(entry["vtbl_type_name"])
     if sid == ida_idaapi.BADADDR:
@@ -487,6 +525,107 @@ def annotate_ctor_call_sites(func_ea, owner_name, owner_type_name):
                 append_comment(prev_ea, "%s: likely allocates object for %s" % (COMMENT_TAG, owner_name), 0)
                 break
     return caller_funcs
+
+
+def apply_hexrays_lvar_type(func_ea, var_name, type_decl):
+    if not initialize_hexrays():
+        return False
+
+    tif = parse_decl_tinfo(type_decl)
+    if tif is None:
+        return False
+
+    ll = ida_hexrays.lvar_locator_t()
+    try:
+        if not ida_hexrays.locate_lvar(ll, func_ea, var_name):
+            return False
+    except Exception:
+        return False
+
+    info = ida_hexrays.lvar_saved_info_t()
+    info.ll = ll
+    info.type = tif
+    try:
+        return bool(ida_hexrays.modify_user_lvar_info(func_ea, ida_hexrays.MLI_TYPE, info))
+    except Exception:
+        return False
+
+
+def get_cfunc_lvars(func_ea):
+    if not initialize_hexrays():
+        return None, []
+
+    try:
+        cfunc = ida_hexrays.decompile(func_ea)
+    except Exception:
+        return None, []
+    if cfunc is None:
+        return None, []
+
+    try:
+        lvars = cfunc.get_lvars()
+    except Exception:
+        lvars = None
+    if lvars is None:
+        return cfunc, []
+    return cfunc, list(lvars)
+
+
+def apply_hexrays_thisarg_type(func_ea, class_type_name):
+    _, lvars = get_cfunc_lvars(func_ea)
+    if not lvars:
+        return False
+
+    arg_candidates = []
+    for lv in lvars:
+        try:
+            if lv.is_arg_var() and not lv.is_fake_var():
+                arg_candidates.append(lv)
+        except Exception:
+            continue
+    if not arg_candidates:
+        return False
+
+    preferred = None
+    for lv in arg_candidates:
+        lname = (lv.name or "").lower()
+        if lname in ("this", "self", "a1", "arg1", "arg0"):
+            preferred = lv
+            break
+    if preferred is None:
+        preferred = arg_candidates[0]
+
+    return apply_hexrays_lvar_type(func_ea, preferred.name, build_class_ptr_decl(class_type_name))
+
+
+def apply_hexrays_ctor_result_type(func_ea, class_type_name):
+    _, lvars = get_cfunc_lvars(func_ea)
+    if not lvars:
+        return False
+
+    candidates = []
+    for lv in lvars:
+        try:
+            if lv.is_arg_var() or lv.is_fake_var() or lv.is_result_var():
+                continue
+        except Exception:
+            continue
+
+        try:
+            if lv.width != u.PTR_SIZE:
+                continue
+        except Exception:
+            continue
+
+        lname = lv.name or ""
+        if not AUTO_LOCAL_PTR_RE.match(lname):
+            continue
+        candidates.append(lv)
+
+    if len(candidates) != 1:
+        return False
+
+    return apply_hexrays_lvar_type(func_ea, candidates[0].name, build_class_ptr_decl(class_type_name))
 
 
 def build_decompilation_context(paths, data):
@@ -579,6 +718,7 @@ def generate_decompilation_types(class_type_names, layouts, vtables, entry_size_
             thunk_adjust = get_thunk_adjustment(func_ea) if kind == "thunk" else 0
             member_name = get_vtable_member_name(func_ea, slot_index, kind, thunk_target, used_names, thunk_adjust=thunk_adjust)
             ensure_generated_member(sid, member_name, slot_index * u.PTR_SIZE)
+            apply_vtable_member_type(sid, member_name, entry["subobject_type_name"], kind, slot_index)
             slot_ea = entry["vftable_ea"] + slot_index * u.PTR_SIZE
             apply_vtable_slot_type(slot_ea, entry["subobject_type_name"], kind, slot_index)
             slot_comment = "%s: vtable slot %u for %s (%s)" % (COMMENT_TAG, slot_index, entry["subobject_name"], kind)
@@ -647,6 +787,8 @@ def improve_decompilation(paths, data, config):
 
     typed_virtuals = set()
     typed_refs = set()
+    thisarg_types = {}
+    ctor_callers = {}
     refreshed_funcs = set()
     for entry in vtables:
         col = entry["col"]
@@ -664,6 +806,7 @@ def improve_decompilation(paths, data, config):
                 if kind == "thunk" and thunk_target != ida_idaapi.BADADDR:
                     append_comment(func_ea, "%s: adjusts self %s then jumps to %#x" % (COMMENT_TAG, format_signed_offset(thunk_adjust), thunk_target), 1)
                 typed_virtuals.add(func_ea)
+                thisarg_types[func_ea] = entry["subobject_type_name"]
                 refreshed_funcs.add(func_ea)
 
         for f in get_vftable_ref_funcs(entry["vftable_ea"]):
@@ -674,13 +817,31 @@ def improve_decompilation(paths, data, config):
                 apply_generated_signature(f.start_ea, entry["owner_type_name"], ref_kind)
                 append_comment(f.start_ea, "%s: %s for %s" % (COMMENT_TAG, ref_kind, entry["owner_name"]), 1)
                 if ref_kind == "possible_constructor":
-                    refreshed_funcs.update(annotate_ctor_call_sites(f.start_ea, entry["owner_name"], entry["owner_type_name"]))
+                    caller_funcs = annotate_ctor_call_sites(f.start_ea, entry["owner_name"], entry["owner_type_name"])
+                    refreshed_funcs.update(caller_funcs)
+                    for caller_ea in caller_funcs:
+                        existing = ctor_callers.get(caller_ea)
+                        if existing is None:
+                            ctor_callers[caller_ea] = entry["owner_type_name"]
+                        elif existing != entry["owner_type_name"]:
+                            ctor_callers[caller_ea] = False
                 typed_refs.add(f.start_ea)
+                thisarg_types[f.start_ea] = entry["owner_type_name"]
                 refreshed_funcs.add(f.start_ea)
 
         vfptr_member_name = get_vfptr_member_name(entry["offset"])
         for refea in idautils.DataRefsTo(entry["vftable_ea"]):
             append_comment(refea, "%s: writes %s::%s -> %s" % (COMMENT_TAG, entry["owner_name"], vfptr_member_name, entry["vtbl_type_name"]), 1)
+
+    for func_ea, class_type_name in thisarg_types.items():
+        if apply_hexrays_thisarg_type(func_ea, class_type_name):
+            refreshed_funcs.add(func_ea)
+
+    for caller_ea, class_type_name in ctor_callers.items():
+        if not class_type_name:
+            continue
+        if apply_hexrays_ctor_result_type(caller_ea, class_type_name):
+            refreshed_funcs.add(caller_ea)
 
     refresh_decompiler_views(refreshed_funcs)
 
